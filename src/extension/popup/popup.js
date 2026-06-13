@@ -407,7 +407,18 @@ function renderVoiceUi() {
  * @returns {boolean}
  */
 function isPushToTalkShortcut(event) {
-  return event.code === 'KeyS' && event.altKey && !event.ctrlKey && !event.metaKey;
+  const platform = navigator.platform.toUpperCase();
+  const isMac = platform.includes('MAC');
+
+  if (event.code !== 'KeyS') {
+    return false;
+  }
+
+  if (isMac) {
+    return event.metaKey && event.shiftKey && !event.ctrlKey && !event.altKey;
+  }
+
+  return event.ctrlKey && event.shiftKey && !event.altKey && !event.metaKey;
 }
 
 /**
@@ -415,7 +426,7 @@ function isPushToTalkShortcut(event) {
  * @returns {boolean}
  */
 function isPushToTalkRelease(event) {
-  return event.code === 'KeyS' || event.code === 'AltLeft' || event.code === 'AltRight';
+  return event.code === 'KeyS' || event.code === 'ShiftLeft' || event.code === 'ShiftRight';
 }
 
 /**

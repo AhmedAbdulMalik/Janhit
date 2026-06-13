@@ -12,8 +12,8 @@
   "commands": {
     "toggle-voice-capture": {
       "suggested_key": {
-        "default": "Alt+S",
-        "mac": "Option+S"
+        "default": "Ctrl+Shift+S",
+        "mac": "Command+Shift+S"
       },
       "description": "Start or stop Clicky Buddy voice capture"
     }

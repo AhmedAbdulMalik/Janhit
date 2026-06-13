@@ -411,14 +411,10 @@ function isPushToTalkShortcut(event) {
   const isMac = platform.includes('MAC');
   const hasControl = event.ctrlKey;
   const hasAlt = event.altKey;
-  const hasExtraModifiers = event.metaKey || event.shiftKey;
-
-  if (hasExtraModifiers) {
-    return false;
-  }
+  const hasOption = event.altKey; // Option key on Mac is same as Alt
 
   if (isMac) {
-    return hasControl && hasAlt;
+    return event.metaKey && hasOption;
   }
 
   return hasControl && hasAlt;

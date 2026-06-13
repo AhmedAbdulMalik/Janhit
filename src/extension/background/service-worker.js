@@ -25,7 +25,8 @@ const OFFSCREEN_DOCUMENT_PATH = 'offscreen/index.html';
  *   intent: string | null,
  *   responseText: string,
  *   workflow: string | null,
- *   confidence: number | null
+ *   confidence: number | null,
+ *   form?: unknown
  * }} VoiceAssistantResult
  */
 
@@ -216,40 +217,13 @@ async function processAssistantRequest(capture) {
   assistantProcessingPromise = (async () => {
     try {
       const audioBlob = await dataUrlToBlob(capture.audioDataUrl);
-      const transcriptResponse = await api.transcribeAudio(audioBlob, 'hi-IN', {
-        signal: assistantAbortController.signal,
-      });
-      const transcript = typeof transcriptResponse.transcript === 'string' ? transcriptResponse.transcript : '';
-
-      if (!transcript) {
-        throw new Error('Transcription returned no text');
-      }
-
-      await updateVoiceStatus({
-        state: 'thinking',
-        isCapturing: false,
-        lastError: null,
-      });
-
-      const processResponse = await api.processTranscript(transcript, {
-        currentUrl: await getCurrentTabUrl(),
+      const voiceAssistResponse = await api.voiceAssist(audioBlob, 'hi-IN', {
+        currentUrl: getCurrentTabUrl(),
       }, {
         signal: assistantAbortController.signal,
       });
 
-      const assistantResult = buildAssistantResult(transcript, processResponse);
-      const formResponse = await api.generateFormDraft(
-        assistantResult.intent || 'municipal_complaint',
-        {
-          transcript,
-          entities: processResponse.data.entities,
-          workflow: assistantResult.workflow,
-        },
-        {
-          signal: assistantAbortController.signal,
-        }
-      );
-
+      const assistantResult = buildAssistantResult(voiceAssistResponse);
       await updateVoiceStatus({
         state: 'speaking',
         isCapturing: false,
@@ -265,21 +239,14 @@ async function processAssistantRequest(capture) {
         result: assistantResult,
       });
 
-      await autofillCurrentForm({
-        ...assistantResult,
-        form: formResponse.form,
-      });
+      await autofillCurrentForm(assistantResult);
 
-      const synthesizedResponse = await api.synthesizeSpeech(assistantResult.responseText, assistantResult.language, {
-        signal: assistantAbortController.signal,
-      });
-
-      if (typeof synthesizedResponse.audio_url === 'string') {
+      if (typeof voiceAssistResponse.audio_url === 'string' && voiceAssistResponse.audio_url) {
         await chrome.runtime.sendMessage({
           action: 'offscreen_play_audio',
           source: 'background',
           target: 'offscreen',
-          audioDataUrl: synthesizedResponse.audio_url,
+          audioDataUrl: voiceAssistResponse.audio_url,
         });
       }
 
@@ -391,14 +358,8 @@ async function autofillCurrentForm(result) {
   }
 }
 
-async function getCurrentTabUrl() {
-  try {
-    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-    const activeTab = tabs[0];
-    return typeof activeTab?.url === 'string' ? activeTab.url : 'unknown';
-  } catch {
-    return 'unknown';
-  }
+function getCurrentTabUrl() {
+  return 'unknown';
 }
 
 /**
@@ -458,24 +419,38 @@ function sanitizeVoiceState(value) {
 }
 
 /**
- * @param {string} transcript
- * @param {{ data?: { intent?: unknown, entities?: unknown, nextQuestion?: unknown, workflow?: unknown, confidence?: unknown } | null }} response
+ * @param {{ language?: unknown, intent?: unknown, workflow?: unknown, confidence?: unknown, responseText?: unknown, form?: unknown, data?: { intent?: unknown, nextQuestion?: unknown, workflow?: unknown, confidence?: unknown } | null }} response
  * @returns {VoiceAssistantResult}
  */
-function buildAssistantResult(transcript, response) {
+function buildAssistantResult(response) {
   const data = response.data && typeof response.data === 'object' ? response.data : {};
-  const intent = typeof data.intent === 'string' ? data.intent : null;
-  const workflow = typeof data.workflow === 'string' ? data.workflow : intent;
-  const confidence = typeof data.confidence === 'number' ? data.confidence : null;
+  const intent = typeof response.intent === 'string'
+    ? response.intent
+    : typeof data.intent === 'string'
+      ? data.intent
+      : null;
+  const workflow = typeof response.workflow === 'string'
+    ? response.workflow
+    : typeof data.workflow === 'string'
+      ? data.workflow
+      : intent;
+  const confidence = typeof response.confidence === 'number'
+    ? response.confidence
+    : typeof data.confidence === 'number'
+      ? data.confidence
+      : null;
   const nextQuestion = typeof data.nextQuestion === 'string' ? data.nextQuestion : '';
-  const responseText = nextQuestion || `I heard: "${transcript}". Please open the relevant government form and I can help fill it.`;
+  const responseText = typeof response.responseText === 'string' && response.responseText.trim()
+    ? response.responseText
+    : nextQuestion || 'Please share one more detail so I can guide you correctly.';
 
   return {
-    language: 'hi-IN',
+    language: typeof response.language === 'string' && response.language.trim() ? response.language : 'hi-IN',
     intent,
     workflow,
     confidence,
     responseText,
+    form: response.form,
   };
 }
 

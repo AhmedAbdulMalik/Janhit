@@ -9,15 +9,6 @@
     "activeTab",
     "scripting"
   ],
-  "commands": {
-    "toggle-voice-capture": {
-      "suggested_key": {
-        "default": "Ctrl+Shift+S",
-        "mac": "Command+Shift+S"
-      },
-      "description": "Start or stop Clicky Buddy voice capture"
-    }
-  },
   "host_permissions": [
     "<all_urls>"
   ],

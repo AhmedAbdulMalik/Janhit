@@ -1,7 +1,7 @@
 // c:\Users\iyand\Downloads\Janhit\src\extension\popup\popup.js
 
 /**
- * Popup runtime for push-to-talk interaction and capture playback.
+ * Popup runtime for click-to-talk interaction and capture playback.
  */
 
 /**
@@ -68,13 +68,9 @@ let currentState = {
   lastAssistantResult: null,
 };
 
-let shortcutCaptureActive = false;
-let pointerCaptureActive = false;
-
 document.addEventListener('DOMContentLoaded', () => {
   cacheDomReferences();
   bindPushToTalkControls();
-  bindLifecycleGuards();
   bindRuntimeMessages();
   void refreshVoiceStatus();
 });
@@ -91,27 +87,9 @@ function bindPushToTalkControls() {
     throw new Error('Voice button element not found');
   }
 
-  elements.voiceButton.addEventListener('pointerdown', handlePointerDown);
-  elements.voiceButton.addEventListener('pointerup', handlePointerUp);
-  elements.voiceButton.addEventListener('pointercancel', handlePointerCancel);
-  elements.voiceButton.addEventListener('pointerleave', handlePointerLeave);
+  elements.voiceButton.addEventListener('click', handleVoiceButtonClick);
   elements.voiceButton.addEventListener('contextmenu', (event) => {
     event.preventDefault();
-  });
-
-  document.addEventListener('keydown', handleShortcutKeyDown);
-  document.addEventListener('keyup', handleShortcutKeyUp);
-}
-
-function bindLifecycleGuards() {
-  window.addEventListener('blur', () => {
-    void releasePushToTalk();
-  });
-
-  document.addEventListener('visibilitychange', () => {
-    if (document.hidden) {
-      void releasePushToTalk();
-    }
   });
 }
 
@@ -154,90 +132,8 @@ function bindRuntimeMessages() {
   });
 }
 
-/**
- * @param {PointerEvent} event
- */
-function handlePointerDown(event) {
-  event.preventDefault();
-  pointerCaptureActive = true;
-
-  if (elements.voiceButton) {
-    elements.voiceButton.setPointerCapture(event.pointerId);
-  }
-
-  void requestVoiceCaptureStart();
-}
-
-/**
- * @param {PointerEvent} event
- */
-function handlePointerUp(event) {
-  event.preventDefault();
-  pointerCaptureActive = false;
-
-  if (elements.voiceButton && elements.voiceButton.hasPointerCapture(event.pointerId)) {
-    elements.voiceButton.releasePointerCapture(event.pointerId);
-  }
-
-  void releasePushToTalk();
-}
-
-/**
- * @param {PointerEvent} event
- */
-function handlePointerCancel(event) {
-  event.preventDefault();
-  pointerCaptureActive = false;
-
-  if (elements.voiceButton && elements.voiceButton.hasPointerCapture(event.pointerId)) {
-    elements.voiceButton.releasePointerCapture(event.pointerId);
-  }
-
-  void releasePushToTalk();
-}
-
-/**
- * @param {PointerEvent} event
- */
-function handlePointerLeave(event) {
-  if ((event.buttons & 1) !== 1) {
-    pointerCaptureActive = false;
-    void releasePushToTalk();
-  }
-}
-
-/**
- * @param {KeyboardEvent} event
- */
-function handleShortcutKeyDown(event) {
-  if (!isPushToTalkShortcut(event)) {
-    return;
-  }
-
-  event.preventDefault();
-
-  if (shortcutCaptureActive) {
-    return;
-  }
-
-  shortcutCaptureActive = true;
-  void requestVoiceCaptureStart();
-}
-
-/**
- * @param {KeyboardEvent} event
- */
-function handleShortcutKeyUp(event) {
-  if (!shortcutCaptureActive) {
-    return;
-  }
-
-  if (!isPushToTalkRelease(event)) {
-    return;
-  }
-
-  shortcutCaptureActive = false;
-  void releasePushToTalk();
+function handleVoiceButtonClick() {
+  void toggleVoiceCapture();
 }
 
 async function requestVoiceCaptureStart() {
@@ -261,6 +157,19 @@ async function releasePushToTalk() {
     await sendRuntimeMessage({ action: 'voice_capture_stop' });
   } catch (error) {
     applyLocalError(error instanceof Error ? error.message : 'Unable to stop voice capture');
+  }
+}
+
+async function toggleVoiceCapture() {
+  try {
+    if (currentState.isCapturing || currentState.state === 'requesting-permission') {
+      await releasePushToTalk();
+      return;
+    }
+
+    await requestVoiceCaptureStart();
+  } catch (error) {
+    applyLocalError(error instanceof Error ? error.message : 'Unable to toggle voice capture');
   }
 }
 
@@ -349,10 +258,6 @@ function renderVoiceUi() {
   elements.voiceButton.classList.remove('listening', 'processing', 'error', 'pressed');
   elements.voiceButton.setAttribute('aria-pressed', currentState.isCapturing ? 'true' : 'false');
 
-  if (pointerCaptureActive || shortcutCaptureActive) {
-    elements.voiceButton.classList.add('pressed');
-  }
-
   if (currentState.state === 'requesting-permission') {
     elements.toggleLabel.textContent = 'Grant Access';
     elements.statusText.textContent = 'Approve microphone permission to let Janhit start listening.';
@@ -362,7 +267,7 @@ function renderVoiceUi() {
   if (currentState.state === 'listening') {
     elements.voiceButton.classList.add('listening');
     elements.toggleLabel.textContent = 'Listening';
-    elements.statusText.textContent = 'Recording live audio now. Release the button or shortcut to stop.';
+    elements.statusText.textContent = 'Recording live audio now. Click the button again to stop.';
     return;
   }
 
@@ -391,6 +296,7 @@ function renderVoiceUi() {
     elements.voiceButton.classList.add('processing');
     elements.toggleLabel.textContent = 'Speaking';
     elements.statusText.textContent = 'Voice reply is being generated and played back. Clicky Buddy is pointing it out.';
+    return;
   if (currentState.state === 'error') {
     elements.voiceButton.classList.add('error');
     elements.toggleLabel.textContent = 'Mic Error';
@@ -399,34 +305,7 @@ function renderVoiceUi() {
   }
 
   elements.toggleLabel.textContent = 'Ready';
-  elements.statusText.textContent = 'Press and hold the mic button to talk to Janhit.';
-}
-
-/**
- * @param {KeyboardEvent} event
- * @returns {boolean}
- */
-function isPushToTalkShortcut(event) {
-  const platform = navigator.platform.toUpperCase();
-  const isMac = platform.includes('MAC');
-
-  if (event.code !== 'KeyS') {
-    return false;
-  }
-
-  if (isMac) {
-    return event.metaKey && event.shiftKey && !event.ctrlKey && !event.altKey;
-  }
-
-  return event.ctrlKey && event.shiftKey && !event.altKey && !event.metaKey;
-}
-
-/**
- * @param {KeyboardEvent} event
- * @returns {boolean}
- */
-function isPushToTalkRelease(event) {
-  return event.code === 'KeyS' || event.code === 'ShiftLeft' || event.code === 'ShiftRight';
+  elements.statusText.textContent = 'Click the mic button to talk to Janhit.';
 }
 
 /**

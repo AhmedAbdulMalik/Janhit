@@ -65,13 +65,21 @@ export async function processTranscript(transcript, context, env) {
 function normalizeProcessResult(payload, fallback, transcript, context) {
   const intent = normalizeIntent(getString(payload.intent), fallback.intent);
   const workflow = getString(payload.workflow, intent);
-  const workflowDefinition = WORKFLOWS[intent] || WORKFLOWS.municipal_complaint;
+  const workflowDefinition = WORKFLOWS[intent] || null;
   const entities = payload.entities && typeof payload.entities === 'object' && !Array.isArray(payload.entities)
     ? { ...fallback.entities, ...sanitizeRecord(payload.entities) }
     : fallback.entities;
-  const missingFields = getMissingFields(workflowDefinition, entities);
-  const nextQuestion = getString(payload.nextQuestion, getString(payload.next_question, getDefaultQuestion(workflowDefinition, missingFields)));
-  const responseText = getString(payload.responseText, buildResponseText(workflowDefinition, entities, missingFields, nextQuestion));
+
+  const missingFields = workflowDefinition ? getMissingFields(workflowDefinition, entities) : [];
+  const nextQuestion = getString(
+    payload.nextQuestion,
+    getString(payload.next_question, workflowDefinition ? getDefaultQuestion(workflowDefinition, missingFields) : '')
+  );
+
+  const responseText = getString(
+    payload.responseText,
+    workflowDefinition ? buildResponseText(workflowDefinition, entities, missingFields, nextQuestion) : getString(fallback.responseText, '')
+  );
   const browserAction = normalizeBrowserAction(payload.browserAction || payload.data?.browserAction) || normalizeBrowserAction(fallback.browserAction) || inferBrowserAction(transcript, intent, context);
 
   return {
@@ -103,7 +111,7 @@ function normalizeBrowserAction(rawAction) {
   }
 
   const candidate = /** @type {{ type?: unknown, targetId?: unknown, target_id?: unknown, targetSelector?: unknown, selector?: unknown, value?: unknown, label?: unknown }} */ (rawAction);
-  const type = typeof candidate.type === 'string' ? candidate.type.trim() : 'none';
+  const type = typeof candidate.type === 'string' ? candidate.type.trim().toLowerCase() : 'none';
   const allowedTypes = ['none', 'highlight', 'scroll_to', 'focus', 'click', 'fill_field'];
 
   if (!allowedTypes.includes(type)) {
@@ -140,33 +148,53 @@ function normalizeBrowserAction(rawAction) {
 
 function classifyLocally(transcript, context) {
   const normalized = transcript.toLowerCase();
+
+  // Prefer signals from the page DOM/context when available
+  const page = context && typeof context === 'object' ? context.page || context : null;
+  const pageTitle = page && typeof page.title === 'string' ? page.title.toLowerCase() : '';
+  const pageText = page && typeof page.visibleText === 'string' ? page.visibleText.toLowerCase() : '';
+  const elementLabels = Array.isArray(page?.elements) ? page.elements.map((e) => ((e && e.label) || e.name || e.text || '')).join(' ').toLowerCase() : '';
+
   const isBanking = includesAny(normalized, [
-    'bank',
-    'account',
-    'transaction',
-    'refund',
-    'upi',
-    'atm',
-    'deduct',
-    'deduction',
-    'unauthorized',
-    'unauthorised',
-    'ombudsman',
-  ]);
-  const intent = isBanking ? 'banking_grievance' : 'municipal_complaint';
+    'bank', 'account', 'transaction', 'refund', 'upi', 'atm', 'deduct', 'deduction', 'unauthorized', 'unauthorised', 'ombudsman',
+  ]) || includesAny(pageTitle + ' ' + pageText + ' ' + elementLabels, ['bank', 'account', 'transaction', 'refund', 'upi', 'atm']);
+
+  const isMunicipal = includesAny(normalized, ['municipal', 'complaint', 'panchayat', 'ward', 'civic']) || includesAny(pageTitle + ' ' + pageText + ' ' + elementLabels, ['municipal', 'complaint', 'civic', 'ward']);
+
+  const formLike = Array.isArray(page?.elements) && page.elements.length >= 2;
+  const formKeywords = ['form', 'registration', 'sign up', 'apply', 'survey', 'your answer', 'email', 'name', 'mobile'];
+  const isFormPage = formLike || includesAny(pageTitle + ' ' + pageText + ' ' + elementLabels, formKeywords);
+
+  let intent = 'general';
+  if (isBanking) intent = 'banking_grievance';
+  else if (isMunicipal) intent = 'municipal_complaint';
+  else if (isFormPage) intent = 'form';
+
   const entities = extractEntities(transcript, intent, context);
-  const workflowDefinition = WORKFLOWS[intent];
-  const missingFields = getMissingFields(workflowDefinition, entities);
-  const nextQuestion = getDefaultQuestion(workflowDefinition, missingFields);
+  const workflowDefinition = WORKFLOWS[intent] || null;
+  const missingFields = workflowDefinition ? getMissingFields(workflowDefinition, entities) : [];
+  const nextQuestion = workflowDefinition ? getDefaultQuestion(workflowDefinition, missingFields) : '';
+
+  // If the page looks like a form, create a short descriptive response.
+  let responseText = '';
+  if (workflowDefinition) {
+    responseText = buildResponseText(workflowDefinition, entities, missingFields, nextQuestion);
+  } else if (intent === 'form') {
+    const title = page && page.title ? page.title : 'this page';
+    const fieldNames = Array.isArray(page?.elements) ? page.elements.slice(0,5).map((e) => e.label || e.name || e.placeholder || e.text).filter(Boolean) : [];
+    responseText = `This looks like a form titled ${title}. Primary fields: ${fieldNames.join(', ') || 'not listed'}.`;
+  } else {
+    responseText = getString(entities.description || transcript, transcript).slice(0, 400);
+  }
 
   return {
     intent,
-    confidence: isBanking ? 0.78 : 0.72,
+    confidence: isBanking ? 0.78 : isMunicipal ? 0.75 : 0.72,
     entities,
     clarification_needed: missingFields.length > 0,
     nextQuestion,
     workflow: intent,
-    responseText: buildResponseText(workflowDefinition, entities, missingFields, nextQuestion),
+    responseText,
     missingFields,
     browserAction: inferBrowserAction(transcript, intent, context),
   };

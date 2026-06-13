@@ -230,6 +230,13 @@ async function processAssistantRequest(capture) {
       });
 
       const assistantResult = buildAssistantResult(voiceAssistResponse);
+      // Debug: surface browserAction returned by the backend for easier troubleshooting
+      try {
+        console.debug('voiceAssistResponse.browserAction:', voiceAssistResponse.browserAction || voiceAssistResponse.data?.browserAction || null);
+        console.debug('assistantResult.browserAction:', assistantResult.browserAction || null);
+      } catch (e) {
+        // ignore logging errors in some environments
+      }
       await updateVoiceStatus({
         state: 'speaking',
         isCapturing: false,

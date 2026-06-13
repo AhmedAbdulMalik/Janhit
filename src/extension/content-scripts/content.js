@@ -42,7 +42,9 @@ async function handleContentMessage(request, sendResponse) {
     }
 
     if (action === 'get_page_context') {
-      sendResponse({ success: true, context: getPageContext() });
+        const ctx = getPageContext();
+        console.debug('Janhit content: get_page_context ->', { url: ctx.url, title: ctx.title, elements: ctx.elements?.length });
+        sendResponse({ success: true, context: ctx });
       return;
     }
 
@@ -52,13 +54,17 @@ async function handleContentMessage(request, sendResponse) {
     }
 
     if (action === 'execute_browser_action') {
+      console.debug('Janhit content: execute_browser_action received', message.browserAction);
       const result = await executeBrowserAction(message.browserAction);
+      console.debug('Janhit content: execute_browser_action result', result);
       sendResponse({ success: true, result });
       return;
     }
 
     if (action === 'autofill_form') {
+      console.debug('Janhit content: autofill_form data', message.data && typeof message.data === 'object' ? { fields: message.data.fields?.length, draft: !!message.data.draft } : {});
       const result = autofillForm(message.data);
+      console.debug('Janhit content: autofill_form result', result);
       sendResponse({ success: true, result });
       return;
     }
@@ -392,7 +398,7 @@ function sanitizeBrowserAction(rawAction) {
   }
 
   const candidate = /** @type {{ type?: unknown, targetId?: unknown, target_id?: unknown, targetSelector?: unknown, selector?: unknown, value?: unknown, label?: unknown }} */ (rawAction);
-  const type = typeof candidate.type === 'string' && candidate.type.trim() ? candidate.type.trim() : 'none';
+  const type = typeof candidate.type === 'string' && candidate.type.trim() ? candidate.type.trim().toLowerCase() : 'none';
   const allowedTypes = ['none', 'highlight', 'scroll_to', 'focus', 'click', 'fill_field'];
 
   return {

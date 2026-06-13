@@ -1,68 +1,36 @@
 // c:\Users\iyand\Downloads\Janhit\src\extension\utils\api.js
 
 /**
- * Typed API utility module for Janhit extension.
- * Handles communication with the Cloudflare Worker backend.
+ * @typedef {{ signal?: AbortSignal }} RequestInitExtras
  */
 
 /**
- * @typedef {{
- *   signal?: AbortSignal
- * }} RequestInitExtras
+ * @typedef {{ transcript: string, language: string, confidence?: number }} TranscribeResponse
  */
 
 /**
- * @typedef {{
- *   transcript: string,
- *   language: string,
- *   confidence?: number
- * }} TranscribeResponse
+ * @typedef {{ intent: string | null, confidence: number | null, entities: Record<string, unknown>, nextQuestion: string | null, workflow: string | null }} ProcessResponseData
  */
 
 /**
- * @typedef {{
- *   intent: string | null,
- *   confidence: number | null,
- *   entities: Record<string, unknown>,
- *   nextQuestion: string | null,
- *   workflow: string | null
- * }} ProcessResponseData
+ * @typedef {{ success: true, data: ProcessResponseData }} ProcessResponse
  */
 
 /**
- * @typedef {{
- *   data: ProcessResponseData
- * }} ProcessResponse
+ * @typedef {{ title: string, workflow: string, description: string, fields: Array<{ name: string, label: string, type: string, value: string }>, draft: string }} GenerateFormResponse
  */
 
 /**
- * @typedef {{
- *   title: string,
- *   fields: Array<{ name: string, label: string, type: string, options?: string[] }>,
- *   draft: string
- * }} GeneratedForm
+ * @typedef {{ audio_url: string, language: string }} SynthesizeResponse
  */
 
-/**
- * @typedef {{
- *   form: GeneratedForm
- * }} GenerateFormResponse
- */
-
-/**
- * @typedef {{
- *   audio_url: string,
- *   language: string
- * }} SynthesizeResponse
- */
-
-class JanhitAPI {
+export class JanhitAPI {
   /**
    * @param {string | null} baseUrl
    */
   constructor(baseUrl = null) {
     this.baseUrl = baseUrl || 'https://janhit.example.com';
-    this.timeout = 45000;
+    this.timeoutMs = 45000;
   }
 
   /**
@@ -127,34 +95,20 @@ class JanhitAPI {
    * @returns {Promise<T>}
    */
   async post(endpoint, data, options = {}) {
-    try {
-      const headers = {
-        'Content-Type': data instanceof FormData ? undefined : 'application/json',
-      };
+    const response = await fetch(`${this.baseUrl}${endpoint}`, {
+      method: 'POST',
+      headers: data instanceof FormData ? undefined : { 'Content-Type': 'application/json' },
+      body: data instanceof FormData ? data : JSON.stringify(data),
+      signal: options.signal || AbortSignal.timeout(this.timeoutMs),
+    });
 
-      const response = await fetch(`${this.baseUrl}${endpoint}`, {
-        method: 'POST',
-        headers: Object.fromEntries(Object.entries(headers).filter(([, value]) => value !== undefined)),
-        body: data instanceof FormData ? data : JSON.stringify(data),
-        signal: options.signal,
-      });
+    const payload = await readJsonResponse(response);
 
-      const responseText = await response.text();
-      const payload = responseText ? parseJsonSafely(responseText) : {};
-
-      if (!response.ok) {
-        throw new Error(getErrorMessage(payload, `API error: ${response.status} ${response.statusText}`));
-      }
-
-      return /** @type {T} */ (payload);
-    } catch (error) {
-      if (error instanceof DOMException && error.name === 'AbortError') {
-        throw error;
-      }
-
-      console.error(`Error calling ${endpoint}:`, error);
-      throw error;
+    if (!response.ok) {
+      throw new Error(getErrorMessage(payload, `API error: ${response.status} ${response.statusText}`));
     }
+
+    return /** @type {T} */ (payload);
   }
 
   /**
@@ -163,32 +117,32 @@ class JanhitAPI {
    * @returns {Promise<T>}
    */
   async get(endpoint) {
-    try {
-      const response = await fetch(`${this.baseUrl}${endpoint}`, {
-        method: 'GET',
-        signal: AbortSignal.timeout(this.timeout),
-      });
+    const response = await fetch(`${this.baseUrl}${endpoint}`, {
+      method: 'GET',
+      signal: AbortSignal.timeout(this.timeoutMs),
+    });
 
-      const responseText = await response.text();
-      const payload = responseText ? parseJsonSafely(responseText) : {};
+    const payload = await readJsonResponse(response);
 
-      if (!response.ok) {
-        throw new Error(getErrorMessage(payload, `API error: ${response.status} ${response.statusText}`));
-      }
-
-      return /** @type {T} */ (payload);
-    } catch (error) {
-      console.error(`Error calling ${endpoint}:`, error);
-      throw error;
+    if (!response.ok) {
+      throw new Error(getErrorMessage(payload, `API error: ${response.status} ${response.statusText}`));
     }
+
+    return /** @type {T} */ (payload);
   }
 }
 
 /**
- * @param {string} text
- * @returns {unknown}
+ * @param {Response} response
+ * @returns {Promise<unknown>}
  */
-function parseJsonSafely(text) {
+async function readJsonResponse(response) {
+  const text = await response.text();
+
+  if (!text) {
+    return {};
+  }
+
   try {
     return JSON.parse(text);
   } catch {
@@ -204,22 +158,15 @@ function parseJsonSafely(text) {
 function getErrorMessage(payload, fallback) {
   if (payload && typeof payload === 'object') {
     const candidate = /** @type {{ message?: unknown, error?: unknown }} */ (payload);
-    const message = typeof candidate.message === 'string' && candidate.message.trim()
-      ? candidate.message
-      : typeof candidate.error === 'string' && candidate.error.trim()
-        ? candidate.error
-        : '';
 
-    return message || fallback;
+    if (typeof candidate.message === 'string' && candidate.message.trim()) {
+      return candidate.message;
+    }
+
+    if (typeof candidate.error === 'string' && candidate.error.trim()) {
+      return candidate.error;
+    }
   }
 
   return fallback;
 }
-
-/** @type {{ JanhitAPI: typeof JanhitAPI }} */
-const exportsObject = { JanhitAPI };
-
-if (typeof module !== 'undefined' && module.exports) {
-  module.exports = exportsObject;
-}
-

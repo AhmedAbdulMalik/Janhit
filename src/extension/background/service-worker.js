@@ -232,12 +232,24 @@ async function processAssistantRequest(capture) {
       });
 
       const processResponse = await api.processTranscript(transcript, {
-        currentUrl: getCurrentTabUrl(),
+        currentUrl: await getCurrentTabUrl(),
       }, {
         signal: assistantAbortController.signal,
       });
 
       const assistantResult = buildAssistantResult(transcript, processResponse);
+      const formResponse = await api.generateFormDraft(
+        assistantResult.intent || 'municipal_complaint',
+        {
+          transcript,
+          entities: processResponse.data.entities,
+          workflow: assistantResult.workflow,
+        },
+        {
+          signal: assistantAbortController.signal,
+        }
+      );
+
       await updateVoiceStatus({
         state: 'speaking',
         isCapturing: false,
@@ -253,7 +265,10 @@ async function processAssistantRequest(capture) {
         result: assistantResult,
       });
 
-      await autofillCurrentForm(assistantResult);
+      await autofillCurrentForm({
+        ...assistantResult,
+        form: formResponse.form,
+      });
 
       const synthesizedResponse = await api.synthesizeSpeech(assistantResult.responseText, assistantResult.language, {
         signal: assistantAbortController.signal,
@@ -376,8 +391,14 @@ async function autofillCurrentForm(result) {
   }
 }
 
-function getCurrentTabUrl() {
-  return 'unknown';
+async function getCurrentTabUrl() {
+  try {
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    const activeTab = tabs[0];
+    return typeof activeTab?.url === 'string' ? activeTab.url : 'unknown';
+  } catch {
+    return 'unknown';
+  }
 }
 
 /**

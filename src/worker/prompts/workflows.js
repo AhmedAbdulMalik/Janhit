@@ -1,10 +1,25 @@
 // c:\Users\iyand\Downloads\Janhit\src\worker\prompts\workflows.js
 
 /**
- * Workflow definitions and prompts for Janhit
- * Defines the conversational flow for each civic workflow
+ * @typedef {{
+ *   step: number,
+ *   question: string,
+ *   required_fields: string[]
+ * }} WorkflowStep
  */
 
+/**
+ * @typedef {{
+ *   id: string,
+ *   name: string,
+ *   description: string,
+ *   category: string,
+ *   examples: string[],
+ *   steps: WorkflowStep[]
+ * }} WorkflowDefinition
+ */
+
+/** @type {Record<string, WorkflowDefinition>} */
 export const WORKFLOWS = {
   municipal_complaint: {
     id: 'municipal_complaint',
@@ -36,7 +51,6 @@ export const WORKFLOWS = {
       },
     ],
   },
-
   banking_grievance: {
     id: 'banking_grievance',
     name: 'Banking Grievance',
@@ -73,9 +87,6 @@ export const WORKFLOWS = {
   },
 };
 
-/**
- * System prompt for intent detection
- */
 export const INTENT_DETECTION_PROMPT = `You are Janhit, an AI civic assistant that helps citizens navigate government processes.
 
 Analyze the user's input and determine:
@@ -91,18 +102,12 @@ Respond with JSON:
   "clarification_needed": true/false
 }`;
 
-/**
- * System prompt for information collection
- */
 export const COLLECTION_PROMPT = `You are a helpful assistant collecting information for a civic complaint.
 
 Based on the conversation context, ask for missing required information.
 Be conversational and sympathetic to the user's concerns.
 Keep responses concise and clear.`;
 
-/**
- * System prompt for form generation
- */
 export const FORM_GENERATION_PROMPT = `You are an expert at generating formal complaint documents.
 
 Using the collected information, generate a well-structured, professional complaint/application.

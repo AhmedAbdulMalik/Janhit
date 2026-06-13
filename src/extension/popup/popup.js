@@ -232,7 +232,7 @@ function handleShortcutKeyUp(event) {
     return;
   }
 
-  if (isPushToTalkShortcut(event)) {
+  if (!isPushToTalkRelease(event)) {
     return;
   }
 
@@ -407,16 +407,15 @@ function renderVoiceUi() {
  * @returns {boolean}
  */
 function isPushToTalkShortcut(event) {
-  const platform = navigator.platform.toUpperCase();
-  const isMac = platform.includes('MAC');
-  const hasAlt = event.altKey;
-  const isSKey = event.key === 's' || event.key === 'S';
+  return event.code === 'KeyS' && event.altKey && !event.ctrlKey && !event.metaKey;
+}
 
-  if (!isSKey) {
-    return false;
-  }
-
-  return hasAlt;
+/**
+ * @param {KeyboardEvent} event
+ * @returns {boolean}
+ */
+function isPushToTalkRelease(event) {
+  return event.code === 'KeyS' || event.code === 'AltLeft' || event.code === 'AltRight';
 }
 
 /**

@@ -1,7 +1,7 @@
 // c:\Users\iyand\Downloads\Janhit\src\extension\popup\popup.js
 
 /**
- * Popup runtime for click-to-talk interaction and capture playback.
+ * Popup runtime for push-to-talk interaction and capture playback.
  */
 
 /**
@@ -87,7 +87,10 @@ function bindPushToTalkControls() {
     throw new Error('Voice button element not found');
   }
 
-  elements.voiceButton.addEventListener('click', handleVoiceButtonClick);
+  elements.voiceButton.addEventListener('pointerdown', handlePointerDown);
+  elements.voiceButton.addEventListener('pointerup', handlePointerUp);
+  elements.voiceButton.addEventListener('pointercancel', handlePointerCancel);
+  elements.voiceButton.addEventListener('pointerleave', handlePointerLeave);
   elements.voiceButton.addEventListener('contextmenu', (event) => {
     event.preventDefault();
   });
@@ -132,8 +135,52 @@ function bindRuntimeMessages() {
   });
 }
 
-function handleVoiceButtonClick() {
-  void toggleVoiceCapture();
+/**
+ * @param {PointerEvent} event
+ */
+function handlePointerDown(event) {
+  event.preventDefault();
+
+  if (elements.voiceButton) {
+    elements.voiceButton.setPointerCapture(event.pointerId);
+  }
+
+  void requestVoiceCaptureStart();
+}
+
+/**
+ * @param {PointerEvent} event
+ */
+function handlePointerUp(event) {
+  event.preventDefault();
+
+  if (elements.voiceButton && elements.voiceButton.hasPointerCapture(event.pointerId)) {
+    elements.voiceButton.releasePointerCapture(event.pointerId);
+  }
+
+  void releasePushToTalk();
+}
+
+/**
+ * @param {PointerEvent} event
+ */
+function handlePointerCancel(event) {
+  event.preventDefault();
+
+  if (elements.voiceButton && elements.voiceButton.hasPointerCapture(event.pointerId)) {
+    elements.voiceButton.releasePointerCapture(event.pointerId);
+  }
+
+  void releasePushToTalk();
+}
+
+/**
+ * @param {PointerEvent} event
+ */
+function handlePointerLeave(event) {
+  if ((event.buttons & 1) !== 1) {
+    void releasePushToTalk();
+  }
 }
 
 async function requestVoiceCaptureStart() {
@@ -157,19 +204,6 @@ async function releasePushToTalk() {
     await sendRuntimeMessage({ action: 'voice_capture_stop' });
   } catch (error) {
     applyLocalError(error instanceof Error ? error.message : 'Unable to stop voice capture');
-  }
-}
-
-async function toggleVoiceCapture() {
-  try {
-    if (currentState.isCapturing || currentState.state === 'requesting-permission') {
-      await releasePushToTalk();
-      return;
-    }
-
-    await requestVoiceCaptureStart();
-  } catch (error) {
-    applyLocalError(error instanceof Error ? error.message : 'Unable to toggle voice capture');
   }
 }
 
@@ -267,7 +301,7 @@ function renderVoiceUi() {
   if (currentState.state === 'listening') {
     elements.voiceButton.classList.add('listening');
     elements.toggleLabel.textContent = 'Listening';
-    elements.statusText.textContent = 'Recording live audio now. Click the button again to stop.';
+    elements.statusText.textContent = 'Recording live audio now. Release the button to stop.';
     return;
   }
 
@@ -297,6 +331,8 @@ function renderVoiceUi() {
     elements.toggleLabel.textContent = 'Speaking';
     elements.statusText.textContent = 'Voice reply is being generated and played back. Clicky Buddy is pointing it out.';
     return;
+  }
+
   if (currentState.state === 'error') {
     elements.voiceButton.classList.add('error');
     elements.toggleLabel.textContent = 'Mic Error';
@@ -305,7 +341,7 @@ function renderVoiceUi() {
   }
 
   elements.toggleLabel.textContent = 'Ready';
-  elements.statusText.textContent = 'Click the mic button to talk to Janhit.';
+  elements.statusText.textContent = 'Press and hold the mic button to talk to Janhit.';
 }
 
 /**

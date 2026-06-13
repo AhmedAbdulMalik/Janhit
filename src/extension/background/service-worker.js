@@ -76,19 +76,22 @@ chrome.runtime.onMessage.addListener(
   }
 );
 
-chrome.commands.onCommand.addListener(
-  /** @param {string} command */
-  async (command) => {
-  if (command !== 'toggle-voice-capture') {
-    return;
-  }
+if (chrome.commands?.onCommand) {
+  chrome.commands.onCommand.addListener(
+    /** @param {string} command */
+    async (command) => {
+      if (command !== 'toggle-voice-capture') {
+        return;
+      }
 
-  if (voiceStatus.isCapturing) {
-    await stopVoiceCapture();
-  } else {
-    await startVoiceCapture();
-  }
-});
+      if (voiceStatus.isCapturing) {
+        await stopVoiceCapture();
+      } else {
+        await startVoiceCapture();
+      }
+    }
+  );
+}
 
 /**
  * @param {unknown} message

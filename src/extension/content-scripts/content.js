@@ -1,4 +1,4 @@
-// /Users/ahmedabdulmalik/Documents/code/hackprix/Janhit/src/extension/content-scripts/content.js
+﻿// /Users/ahmedabdulmalik/Documents/code/hackprix/Janhit/src/extension/content-scripts/content.js
 
 /**
  * DOM-aware browser agent for Janhit.
@@ -1188,11 +1188,11 @@ function setBuddyOverlay(text, state, targetRect) {
  * @param {'idle'|'requesting-permission'|'listening'|'processing'|'transcribing'|'thinking'|'speaking'|'error'} state
  */
 function getStateLabel(state) {
-  if (state === 'listening') return 'Listening…';
-  if (state === 'processing') return 'Processing…';
-  if (state === 'transcribing') return 'Transcribing…';
-  if (state === 'thinking') return 'Thinking…';
-  if (state === 'speaking') return 'Speaking…';
+  if (state === 'listening') return 'Listeningâ€¦';
+  if (state === 'processing') return 'Processingâ€¦';
+  if (state === 'transcribing') return 'Transcribingâ€¦';
+  if (state === 'thinking') return 'Thinkingâ€¦';
+  if (state === 'speaking') return 'Speakingâ€¦';
   if (state === 'error') return 'Oops, something went wrong.';
   return 'Clicky Buddy is ready.';
 }
@@ -1260,7 +1260,7 @@ function updateBuddyOverlayForAssistant(result) {
     const highlightTarget = resolveTargetElement(safeAction) || document.body;
     drawHighlight(highlightTarget, safeAction?.label || 'Target');
   } else {
-    setBuddyOverlay(responseText || 'Here’s what I found.', 'speaking', null);
+    setBuddyOverlay(responseText || 'Found it.', 'speaking', null);
   }
 }
 
@@ -1385,3 +1385,4 @@ function delay(milliseconds) {
     window.setTimeout(resolve, milliseconds);
   });
 }
+

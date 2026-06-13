@@ -1,4 +1,4 @@
-// /Users/ahmedabdulmalik/Documents/code/hackprix/Janhit/src/worker/routes/process.js
+﻿// /Users/ahmedabdulmalik/Documents/code/hackprix/Janhit/src/worker/routes/process.js
 
 import { generateGeminiJson } from '../lib/gemini.js';
 import { clamp, createJsonResponse, getNumber, getString, readJsonBody } from '../lib/http.js';
@@ -235,10 +235,11 @@ function classifyLocally(transcript, context) {
   const elementLabels = elementArray.map((e) => ((e && e.label) || e.name || e.text || '')).join(' ').toLowerCase();
 
   const formLike = Array.isArray(page?.elements) && page.elements.length >= 2;
+  const pageSignals = pageTitle + ' ' + pageText + ' ' + elementLabels;
   const formKeywords = ['form', 'registration', 'sign up', 'apply', 'survey', 'your answer', 'email', 'name', 'mobile', 'search', 'url', 'link'];
-  const isFormPage = formLike || includesAny(pageTitle + ' ' + pageText + ' ' + elementLabels, formKeywords);
+  const isPageInteraction = formLike || includesAny(pageSignals, formKeywords) || includesAny(normalized, ['highlight', 'click', 'focus', 'fill', 'search', 'where is', 'show me', 'open', 'find', 'locate']);
 
-  const intent = isFormPage ? 'form' : 'general';
+  const intent = isPageInteraction ? 'page_action' : 'general';
 
   const entities = extractEntities(transcript, intent, context);
   const workflowDefinition = isWorkflowKey(intent) ? /** @type {WorkflowDefinition} */ (WORKFLOWS[intent]) : null;
@@ -380,12 +381,21 @@ function buildGeneralResponse(transcript, domAction, context, nextQuestion) {
 
   const page = context && typeof context === 'object' ? context.page || context : null;
   const pageTitle = page && typeof page.title === 'string' ? page.title.trim() : '';
+  const pageText = page && typeof page.visibleText === 'string' ? page.visibleText : '';
+  const topElements = Array.isArray(page?.elements)
+    ? page.elements.slice(0, 5).map((element) => sanitizeValueText(element.label || element.name || element.placeholder || element.text || '')).filter(Boolean)
+    : [];
 
   if (pageTitle) {
-    return `I’m looking at ${pageTitle}. ${nextQuestion || 'Tell me which element or field you want me to find.'}`.trim();
+    const summary = topElements.length > 0 ? `I see ${topElements.join(', ')}.` : '';
+    return `You’re on ${pageTitle}. ${summary}`.trim();
   }
 
-  if (includesAny(transcript.toLowerCase(), ['where', 'search', 'url', 'link', 'button', 'field', 'input'])) {
+  if (pageText.trim()) {
+    return `This page says: ${pageText.trim().split(/\s+/).slice(0, 18).join(' ')}.`;
+  }
+
+  if (includesAny(transcript.toLowerCase(), ['where', 'search', 'url', 'link', 'button', 'field', 'input', 'highlight', 'click', 'fill'])) {
     return 'Finding the best match on the page.';
   }
 
@@ -406,6 +416,10 @@ function avoidEchoResponse(transcript, responseText, domAction, context, nextQue
   }
 
   return rawResponse;
+}
+
+function sanitizeValueText(value) {
+  return typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : '';
 }
 
 /**
@@ -649,4 +663,6 @@ function sanitizeValue(value) {
 function includesAny(value, terms) {
   return terms.some((term) => value.includes(term));
 }
+
+
 

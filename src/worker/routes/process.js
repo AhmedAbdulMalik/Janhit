@@ -386,10 +386,10 @@ function buildGeneralResponse(transcript, domAction, context, nextQuestion) {
   }
 
   if (includesAny(transcript.toLowerCase(), ['where', 'search', 'url', 'link', 'button', 'field', 'input'])) {
-    return 'Tell me which element or field on the page you want me to find.';
+    return 'Finding the best match on the page.';
   }
 
-  return 'Tell me what you want me to do on the current page.';
+  return 'Finding the best match on the page.';
 }
 
 function avoidEchoResponse(transcript, responseText, domAction, context, nextQuestion) {

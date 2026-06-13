@@ -409,19 +409,14 @@ function renderVoiceUi() {
 function isPushToTalkShortcut(event) {
   const platform = navigator.platform.toUpperCase();
   const isMac = platform.includes('MAC');
-  const hasControl = event.ctrlKey;
   const hasAlt = event.altKey;
-  const isYKey = event.key === 'y' || event.key === 'Y';
+  const isSKey = event.key === 's' || event.key === 'S';
 
-  if (!isYKey) {
+  if (!isSKey) {
     return false;
   }
 
-  if (isMac) {
-    return event.metaKey && hasAlt;
-  }
-
-  return hasControl && hasAlt;
+  return hasAlt;
 }
 
 /**

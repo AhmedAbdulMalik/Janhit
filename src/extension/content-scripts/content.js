@@ -4,22 +4,73 @@
  * DOM-aware browser agent for Janhit.
  * Scans visible page controls, returns compact page context, and executes safe browser actions.
  */
+/* global chrome */
 
+const chromeRuntime = /** @type {any} */ (window).chrome?.runtime;
+
+/**
+ * @typedef {{
+ *   action?: unknown,
+ *   target?: unknown,
+ *   data?: unknown,
+ *   browserAction?: unknown,
+ *   state?: unknown,
+ *   result?: unknown,
+ * }} ContentMessage
+ * @typedef {{
+ *   state: 'idle' | 'requesting-permission' | 'listening' | 'processing' | 'transcribing' | 'thinking' | 'speaking' | 'error',
+ *   lastError?: string,
+ * }} VoiceStateMessage
+ * @typedef {{
+ *   responseText?: string,
+ *   browserAction?: unknown,
+ *   domAction?: unknown,
+ * }} AssistantResult
+ */
 const MAX_CONTEXT_ELEMENTS = 90;
 const MAX_TEXT_LENGTH = 180;
 const HIGHLIGHT_ID = 'janhit-element-highlight';
 const HIGHLIGHT_LABEL_ID = 'janhit-element-highlight-label';
 const DRAFT_ID = 'janhit-generated-draft';
+const OVERLAY_ID = 'clicky-buddy-overlay';
+const CURSOR_ID = 'clicky-buddy-cursor';
+const BUBBLE_ID = 'clicky-buddy-bubble';
 
 /** @type {Map<string, Element>} */
 const elementRegistry = new Map();
 
+/** @type {{ visible: boolean, state: string, text: string, targetRect: { x: number, y: number, width: number, height: number } | null, timeoutId: number | null }} */
+const buddyState = {
+  visible: false,
+  state: 'idle',
+  text: '',
+  targetRect: null,
+  timeoutId: null,
+};
+
+const VALID_VOICE_STATES = ['idle', 'requesting-permission', 'listening', 'processing', 'transcribing', 'thinking', 'speaking', 'error'];
+
+/**
+ * @param {unknown} value
+ * @returns {value is VoiceStateMessage['state']}
+ */
+function isVoiceState(value) {
+  return typeof value === 'string' && VALID_VOICE_STATES.includes(value);
+}
+
 console.log('Janhit content script loaded');
 
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  void handleContentMessage(request, sendResponse);
-  return true;
-});
+chromeRuntime?.onMessage.addListener(
+  /**
+   * @param {unknown} request
+   * @param {unknown} _sender
+   * @param {(response?: unknown) => void} sendResponse
+   */
+  (request, _sender, sendResponse) => {
+    void handleContentMessage(request, sendResponse);
+    return true;
+  }
+);
 
 /**
  * @param {unknown} request
@@ -32,7 +83,7 @@ async function handleContentMessage(request, sendResponse) {
       return;
     }
 
-    const message = /** @type {{ action?: unknown, target?: unknown, data?: unknown, browserAction?: unknown }} */ (request);
+    const message = /** @type {ContentMessage} */ (request);
     const action = typeof message.action === 'string' ? message.action : '';
     const target = typeof message.target === 'string' ? message.target : null;
 
@@ -45,6 +96,18 @@ async function handleContentMessage(request, sendResponse) {
         const ctx = getPageContext();
         console.debug('Janhit content: get_page_context ->', { url: ctx.url, title: ctx.title, elements: ctx.elements?.length });
         sendResponse({ success: true, context: ctx });
+      return;
+    }
+
+    if (action === 'voice_capture_state_changed') {
+      updateBuddyOverlayForState(/** @type {VoiceStateMessage} */ (message.state));
+      sendResponse({ success: true });
+      return;
+    }
+
+    if (action === 'assistant_response_ready') {
+      updateBuddyOverlayForAssistant(/** @type {AssistantResult} */ (message.result));
+      sendResponse({ success: true });
       return;
     }
 
@@ -62,7 +125,12 @@ async function handleContentMessage(request, sendResponse) {
     }
 
     if (action === 'autofill_form') {
-      console.debug('Janhit content: autofill_form data', message.data && typeof message.data === 'object' ? { fields: message.data.fields?.length, draft: !!message.data.draft } : {});
+      const dataPayload = /** @type {{ fields?: unknown, draft?: unknown }} */ (typeof message.data === 'object' && message.data !== null ? message.data : {});
+      const payloadSummary = {
+        fields: Array.isArray(dataPayload.fields) ? dataPayload.fields.length : 0,
+        draft: Boolean(dataPayload.draft),
+      };
+      console.debug('Janhit content: autofill_form data', payloadSummary);
       const result = autofillForm(message.data);
       console.debug('Janhit content: autofill_form result', result);
       sendResponse({ success: true, result });
@@ -83,6 +151,7 @@ async function handleContentMessage(request, sendResponse) {
  *   language: string,
  *   viewport: { width: number, height: number, scrollX: number, scrollY: number },
  *   activeElementId: string | null,
+ *   activeElementRect: { x: number, y: number, width: number, height: number } | null,
  *   elements: Array<Record<string, unknown>>,
  *   visibleText: string
  * }}
@@ -105,6 +174,7 @@ function getPageContext() {
       scrollY: window.scrollY,
     },
     activeElementId,
+    activeElementRect: getActiveElementRect(),
     elements,
     visibleText: getVisiblePageText(),
   };
@@ -182,6 +252,7 @@ function serializeElement(element, index) {
  */
 async function executeBrowserAction(rawAction) {
   const browserAction = sanitizeBrowserAction(rawAction);
+  console.debug('Janhit content: execute_browser_action received', browserAction);
 
   if (!browserAction || browserAction.type === 'none') {
     return {
@@ -195,6 +266,7 @@ async function executeBrowserAction(rawAction) {
   const element = resolveTargetElement(browserAction);
 
   if (!element) {
+    console.debug('Janhit content: target element not found for', browserAction);
     return {
       action: browserAction.type,
       targetId: browserAction.targetId,
@@ -206,12 +278,14 @@ async function executeBrowserAction(rawAction) {
   if (browserAction.type === 'highlight') {
     revealElement(element);
     drawHighlight(element, browserAction.label || 'Here');
+    console.debug('Janhit content: highlight executed', browserAction.targetSelector || browserAction.targetId);
     return createActionResult(browserAction, true, 'Element highlighted');
   }
 
   if (browserAction.type === 'scroll_to') {
     revealElement(element);
     drawHighlight(element, browserAction.label || 'Here');
+    console.debug('Janhit content: scroll executed', browserAction.targetSelector || browserAction.targetId);
     return createActionResult(browserAction, true, 'Scrolled to element');
   }
 
@@ -219,6 +293,7 @@ async function executeBrowserAction(rawAction) {
     revealElement(element);
     focusElement(element);
     drawHighlight(element, browserAction.label || 'Focused here');
+    console.debug('Janhit content: focus executed', browserAction.targetSelector || browserAction.targetId);
     return createActionResult(browserAction, true, 'Element focused');
   }
 
@@ -227,6 +302,7 @@ async function executeBrowserAction(rawAction) {
     drawHighlight(element, browserAction.label || 'Clicking this');
     await delay(160);
     clickElement(element);
+    console.debug('Janhit content: click executed', browserAction.targetSelector || browserAction.targetId);
     return createActionResult(browserAction, true, 'Element clicked');
   }
 
@@ -236,15 +312,18 @@ async function executeBrowserAction(rawAction) {
     if (!value || !canSetValue(element)) {
       revealElement(element);
       drawHighlight(element, browserAction.label || 'This field needs input');
+      console.debug('Janhit content: fill_field failed - no value or not editable', browserAction.targetSelector || browserAction.targetId);
       return createActionResult(browserAction, false, 'No fill value was provided or field is not editable');
     }
 
     setFieldValue(element, value);
     revealElement(element);
     drawHighlight(element, browserAction.label || 'Filled this field');
+    console.debug('Janhit content: fill_field executed', browserAction.targetSelector || browserAction.targetId);
     return createActionResult(browserAction, true, 'Field filled');
   }
 
+  console.debug('Janhit content: unsupported browser action', browserAction.type);
   return createActionResult(browserAction, false, `Unsupported browser action: ${browserAction.type}`);
 }
 
@@ -254,6 +333,7 @@ async function executeBrowserAction(rawAction) {
  */
 function extractFormData() {
   const fields = getFormFields();
+  /** @type {Record<string, { name: string, label: string, type: string, value: string }> } */
   const formData = {};
 
   fields.forEach((field, index) => {
@@ -275,6 +355,7 @@ function extractFormData() {
 function autofillForm(rawData) {
   const data = sanitizeAutofillData(rawData);
   const fields = getFormFields();
+  /** @type {string[]} */
   const filled = [];
   const valueMap = buildValueMap(data);
 
@@ -356,7 +437,8 @@ function isFormFieldDefinition(value) {
  * @returns {Record<string, string>}
  */
 function buildValueMap(data) {
-  const fields = data.fields || [];
+  const fields = Array.isArray(data.fields) ? data.fields : [];
+  /** @type {Record<string, string>} */
   const values = {};
 
   fields.forEach((field, index) => {
@@ -422,7 +504,15 @@ function sanitizeBrowserAction(rawAction) {
  * @param {{ targetId: string | null, targetSelector: string }} action
  * @returns {Element | null}
  */
+/**
+ * @param {{ targetId: string | null, targetSelector: string } | null | undefined} action
+ * @returns {Element | null}
+ */
 function resolveTargetElement(action) {
+  if (!action) {
+    return null;
+  }
+
   if (action.targetId && elementRegistry.has(action.targetId)) {
     return elementRegistry.get(action.targetId) || null;
   }
@@ -682,7 +772,7 @@ function getElementSelector(element) {
   }
 
   const path = [];
-  let current = element;
+  let current = /** @type {Element | null} */ (element);
 
   while (current && current.nodeType === Node.ELEMENT_NODE && current !== document.documentElement) {
     const tag = current.tagName.toLowerCase();
@@ -702,9 +792,10 @@ function getElementSelector(element) {
       selector += `.${className}`;
     }
 
-    const siblings = Array.from(current.parentNode?.children || []).filter((child) => child.tagName === current.tagName);
+    const currentElement = current;
+  const siblings = Array.from(currentElement.parentNode?.children || []).filter((child) => child.tagName === currentElement.tagName);
     if (siblings.length > 1) {
-      const index = siblings.indexOf(current) + 1;
+      const index = siblings.indexOf(currentElement) + 1;
       selector += `:nth-of-type(${index})`;
     }
 
@@ -748,8 +839,12 @@ function isUsableFormControl(element) {
     return false;
   }
 
-  if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement) {
+  if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
     return !element.disabled && !element.readOnly;
+  }
+
+  if (element instanceof HTMLSelectElement) {
+    return !element.disabled;
   }
 
   return false;
@@ -772,8 +867,12 @@ function isClickableElement(element) {
  * @returns {boolean}
  */
 function isEditableElement(element) {
-  if (element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement) {
+  if (element instanceof HTMLTextAreaElement) {
     return !element.disabled && !element.readOnly;
+  }
+
+  if (element instanceof HTMLSelectElement) {
+    return !element.disabled;
   }
 
   if (element instanceof HTMLInputElement) {
@@ -792,8 +891,12 @@ function canSetValue(element) {
     return !element.disabled && !element.readOnly && !['checkbox', 'radio', 'hidden', 'submit', 'button', 'reset', 'image', 'file', 'password'].includes(element.type);
   }
 
-  if (element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement) {
+  if (element instanceof HTMLTextAreaElement) {
     return !element.disabled && !element.readOnly;
+  }
+
+  if (element instanceof HTMLSelectElement) {
+    return !element.disabled;
   }
 
   return element.getAttribute('contenteditable') === 'true';
@@ -946,6 +1049,221 @@ function removeHighlight() {
   document.getElementById(HIGHLIGHT_LABEL_ID)?.remove();
 }
 
+function getActiveElementRect() {
+  const active = document.activeElement;
+  if (!(active instanceof Element)) {
+    return null;
+  }
+
+  try {
+    const rect = active.getBoundingClientRect();
+    return {
+      x: Math.round(rect.left),
+      y: Math.round(rect.top),
+      width: Math.round(rect.width),
+      height: Math.round(rect.height),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function ensureBuddyOverlay() {
+  if (document.getElementById(OVERLAY_ID)) {
+    return;
+  }
+
+  const overlay = document.createElement('div');
+  overlay.id = OVERLAY_ID;
+  overlay.style.cssText = [
+    'position:fixed',
+    'left:0',
+    'top:0',
+    'width:100vw',
+    'height:100vh',
+    'pointer-events:none',
+    'z-index:2147483646',
+  ].join(';');
+
+  const cursor = document.createElement('div');
+  cursor.id = CURSOR_ID;
+  cursor.style.cssText = [
+    'position:absolute',
+    'width:0',
+    'height:0',
+    'border-left:16px solid transparent',
+    'border-right:16px solid transparent',
+    'border-bottom:24px solid rgba(14,165,233,0.95)',
+    'filter:drop-shadow(0 10px 24px rgba(14,165,233,0.35))',
+    'transform:translate(-50%, -100%) scale(1)',
+    'transition:transform 220ms ease, left 220ms ease, top 220ms ease',
+    'pointer-events:none',
+  ].join(';');
+
+  const bubble = document.createElement('div');
+  bubble.id = BUBBLE_ID;
+  bubble.style.cssText = [
+    'position:absolute',
+    'min-width:220px',
+    'max-width:320px',
+    'padding:12px 14px',
+    'border-radius:18px',
+    'background:rgba(15,23,42,0.9)',
+    'color:#ffffff',
+    'font:400 13px/1.5 system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif',
+    'box-shadow:0 20px 40px rgba(15,23,42,0.24)',
+    'backdrop-filter:blur(8px)',
+    'transform:translate(-50%, -130%)',
+    'transition:opacity 180ms ease, transform 180ms ease',
+    'opacity:0',
+    'pointer-events:none',
+    'white-space:pre-wrap',
+    'word-break:break-word',
+    'line-height:1.4',
+  ].join(';');
+  bubble.textContent = '';
+
+  overlay.append(cursor, bubble);
+  document.body.appendChild(overlay);
+}
+
+/**
+ * @param {string} text
+ * @param {'idle'|'requesting-permission'|'listening'|'processing'|'transcribing'|'thinking'|'speaking'|'error'} state
+ * @param {{ x: number, y: number, width: number, height: number } | null} targetRect
+ */
+function setBuddyOverlay(text, state, targetRect) {
+  ensureBuddyOverlay();
+  const overlay = document.getElementById(OVERLAY_ID);
+  const cursor = document.getElementById(CURSOR_ID);
+  const bubble = document.getElementById(BUBBLE_ID);
+
+  if (!overlay || !cursor || !bubble) {
+    return;
+  }
+
+  buddyState.visible = true;
+  buddyState.state = state || 'idle';
+  buddyState.text = text || '';
+  buddyState.targetRect = targetRect || null;
+
+  const safeText = text && typeof text === 'string' ? text.trim() : '';
+  bubble.textContent = safeText || getStateLabel(state);
+  bubble.style.opacity = '1';
+
+  const viewport = {
+    width: window.innerWidth,
+    height: window.innerHeight,
+  };
+
+  let left = viewport.width * 0.5;
+  let top = viewport.height * 0.2;
+
+  if (targetRect && typeof targetRect === 'object') {
+    left = targetRect.x + Math.max(16, targetRect.width / 2);
+    top = targetRect.y - 14;
+    if (top < 72) {
+      top = targetRect.y + targetRect.height + 28;
+    }
+  }
+
+  cursor.style.left = `${Math.min(Math.max(16, left), viewport.width - 16)}px`;
+  cursor.style.top = `${Math.min(Math.max(32, top), viewport.height - 32)}px`;
+  bubble.style.left = cursor.style.left;
+  bubble.style.top = `${Math.max(30, parseFloat(cursor.style.top) - 18)}px`;
+
+  if (buddyState.timeoutId) {
+    window.clearTimeout(buddyState.timeoutId);
+    buddyState.timeoutId = null;
+  }
+
+  if (state === 'idle') {
+    buddyState.timeoutId = window.setTimeout(() => {
+      hideBuddyOverlay();
+    }, 2500);
+  }
+}
+
+/**
+ * @param {'idle'|'requesting-permission'|'listening'|'processing'|'transcribing'|'thinking'|'speaking'|'error'} state
+ */
+function getStateLabel(state) {
+  if (state === 'listening') return 'Listening…';
+  if (state === 'processing') return 'Processing…';
+  if (state === 'transcribing') return 'Transcribing…';
+  if (state === 'thinking') return 'Thinking…';
+  if (state === 'speaking') return 'Speaking…';
+  if (state === 'error') return 'Oops, something went wrong.';
+  return 'Clicky Buddy is ready.';
+}
+
+function hideBuddyOverlay() {
+  const overlay = document.getElementById(OVERLAY_ID);
+  const bubble = document.getElementById(BUBBLE_ID);
+  if (bubble) {
+    bubble.style.opacity = '0';
+  }
+  if (overlay) {
+    overlay.style.pointerEvents = 'none';
+  }
+  buddyState.visible = false;
+}
+
+/**
+ * @param {VoiceStateMessage | null | undefined} state
+ */
+function updateBuddyOverlayForState(state) {
+  if (!state || typeof state !== 'object') {
+    return;
+  }
+
+  const candidate = /** @type {{ state?: unknown, lastError?: unknown }} */ (state);
+  const nextState = isVoiceState(candidate.state) ? /** @type {VoiceStateMessage['state']} */ (candidate.state) : 'idle';
+  const label = typeof candidate.lastError === 'string' && candidate.lastError ? candidate.lastError : getStateLabel(nextState);
+  setBuddyOverlay(label, nextState, buddyState.targetRect);
+}
+
+/**
+ * @param {AssistantResult | null | undefined} result
+ */
+function updateBuddyOverlayForAssistant(result) {
+  if (!result || typeof result !== 'object') {
+    return;
+  }
+
+  const candidate = /** @type {{ responseText?: unknown, browserAction?: unknown, domAction?: unknown }} */ (result);
+  const responseText = typeof candidate.responseText === 'string' ? candidate.responseText : '';
+  const action = candidate.domAction || candidate.browserAction || null;
+  let targetRect = null;
+
+  if (action && typeof action === 'object') {
+    const browserAction = sanitizeBrowserAction(action);
+    const element = resolveTargetElement(browserAction);
+    if (element) {
+      try {
+        const rect = element.getBoundingClientRect();
+        targetRect = {
+          x: Math.round(rect.left),
+          y: Math.round(rect.top),
+          width: Math.round(rect.width),
+          height: Math.round(rect.height),
+        };
+      } catch {
+        targetRect = null;
+      }
+    }
+  }
+
+  if (targetRect) {
+    setBuddyOverlay(responseText || getStateLabel('speaking'), 'speaking', targetRect);
+    const safeAction = sanitizeBrowserAction(action);
+    const highlightTarget = resolveTargetElement(safeAction) || document.body;
+    drawHighlight(highlightTarget, safeAction?.label || 'Target');
+  } else {
+    setBuddyOverlay(responseText || 'Here’s what I found.', 'speaking', null);
+  }
+}
+
 /**
  * @param {string} draft
  */
@@ -991,7 +1309,7 @@ function getVisiblePageText() {
  * @returns {boolean}
  */
 function isJanhitElement(element) {
-  return element.id === HIGHLIGHT_ID || element.id === HIGHLIGHT_LABEL_ID || element.id === DRAFT_ID || Boolean(element.closest(`#${HIGHLIGHT_ID}, #${HIGHLIGHT_LABEL_ID}, #${DRAFT_ID}`));
+  return element.id === HIGHLIGHT_ID || element.id === HIGHLIGHT_LABEL_ID || element.id === DRAFT_ID || element.id === OVERLAY_ID || element.id === CURSOR_ID || element.id === BUBBLE_ID || Boolean(element.closest(`#${HIGHLIGHT_ID}, #${HIGHLIGHT_LABEL_ID}, #${DRAFT_ID}, #${OVERLAY_ID}`));
 }
 
 /**

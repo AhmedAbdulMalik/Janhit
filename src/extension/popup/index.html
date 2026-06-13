@@ -9,8 +9,8 @@
 <body>
   <div class="container">
     <div class="header">
-      <h1>Janhit</h1>
-      <p class="subtitle">Hold to talk. Release to process.</p>
+      <h1>Clicky Buddy</h1>
+      <p class="subtitle">A browser-native voice companion with pointing and highlights.</p>
     </div>
 
     <div class="voice-control">
@@ -37,6 +37,13 @@
     <div class="assistant-panel">
       <p class="assistant-heading">Voice Flow</p>
       <p class="assistant-copy" id="response-text">Press and hold to send your speech to Janhit.</p>
+    </div>
+    <div id="dom-action-confirm" class="dom-action-confirm" style="display:none; padding:10px; border-top:1px solid #eee;">
+      <p id="dom-action-text" style="margin:0 0 8px 0; font-size:13px; color:#111"></p>
+      <div style="display:flex; gap:8px;">
+        <button id="dom-action-accept" style="background:#0ea5e9;color:#fff;border:none;padding:8px 10px;border-radius:6px;">Confirm</button>
+        <button id="dom-action-reject" style="background:#ef4444;color:#fff;border:none;padding:8px 10px;border-radius:6px;">Cancel</button>
+      </div>
     </div>
   </div>
 

@@ -1,14 +1,23 @@
 {
   "manifest_version": 3,
-  "name": "Janhit - AI Civic Assistant",
+  "name": "JANHIT - AI Assistant",
   "version": "1.0.0",
-  "description": "Voice-first civic assistant. Hold Ctrl + Alt to speak, or press the popup mic.",
+  "description": "Voice-driven browser companion with an in-page blue cursor overlay, safe DOM actions, and secure AI backend proxying.",
   "permissions": [
     "offscreen",
     "storage",
     "activeTab",
     "scripting"
   ],
+  "commands": {
+    "toggle-voice-capture": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+Y",
+        "mac": "Command+Shift+Y"
+      },
+      "description": "Start or stop Clicky Buddy voice capture"
+    }
+  },
   "host_permissions": [
     "<all_urls>"
   ],

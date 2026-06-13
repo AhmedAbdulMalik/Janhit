@@ -8,6 +8,7 @@
     "typecheck": "tsc --noEmit",
     "build": "node scripts/build-extension.mjs",
     "dev:worker": "wrangler dev src/worker/index.js --local",
+    "test:dom-action": "node scripts/test-dom-action.mjs",
     "deploy:worker": "wrangler deploy src/worker/index.js"
   },
   "devDependencies": {

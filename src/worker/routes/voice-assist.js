@@ -25,6 +25,7 @@ export async function handleVoiceAssist(request, env) {
       confidence: processed.confidence,
       responseText,
       browserAction: processed.browserAction || null,
+      domAction: processed.domAction || null,
       audio_url: audio.audioUrl,
       audio_mime_type: audio.mimeType,
       data: {
@@ -36,6 +37,7 @@ export async function handleVoiceAssist(request, env) {
         responseText,
         missingFields: processed.missingFields,
         browserAction: processed.browserAction || null,
+        domAction: processed.domAction || null,
       },
       form,
       transcript: includeTranscript ? transcription.transcript : undefined,

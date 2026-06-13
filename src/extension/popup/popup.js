@@ -140,6 +140,12 @@ function bindRuntimeMessages() {
         return;
       }
 
+      if (message.action === 'assistant_response_ready' && message.result) {
+        renderAssistantResult(message.result);
+        sendResponse({ success: true });
+        return;
+      }
+
       sendResponse({ success: false, error: 'Unhandled popup message' });
     } catch (error) {
       const messageText = error instanceof Error ? error.message : 'Popup message handling failed';
@@ -311,6 +317,15 @@ function renderAssistantResult(rawResult) {
     const detailSuffix = details.length > 0 ? ` (${details.join(' | ')})` : '';
     elements.responseText.textContent = `${result.responseText}${detailSuffix}`;
   }
+
+  // If backend returned a domAction requiring confirmation (click/fill), surface it.
+  try {
+    if (rawResult && rawResult.domAction && (rawResult.domAction.action === 'click' || rawResult.domAction.action === 'fill_form')) {
+      renderDomActionConfirmation(rawResult.domAction);
+    }
+  } catch (e) {
+    // ignore UI errors
+  }
 }
 
 /**
@@ -375,10 +390,7 @@ function renderVoiceUi() {
   if (currentState.state === 'speaking') {
     elements.voiceButton.classList.add('processing');
     elements.toggleLabel.textContent = 'Speaking';
-    elements.statusText.textContent = 'Voice reply is being generated and played back.';
-    return;
-  }
-
+    elements.statusText.textContent = 'Voice reply is being generated and played back. Clicky Buddy is pointing it out.';
   if (currentState.state === 'error') {
     elements.voiceButton.classList.add('error');
     elements.toggleLabel.textContent = 'Mic Error';
@@ -509,5 +521,40 @@ function sanitizeAssistantResult(value) {
     responseText: typeof candidate.responseText === 'string' ? candidate.responseText : '',
     workflow: typeof candidate.workflow === 'string' && candidate.workflow.trim() ? candidate.workflow : null,
     confidence: typeof candidate.confidence === 'number' ? candidate.confidence : null,
+    domAction: candidate.domAction || null,
+  };
+}
+
+function renderDomActionConfirmation(domAction) {
+  const container = document.getElementById('dom-action-confirm');
+  const text = document.getElementById('dom-action-text');
+  const accept = document.getElementById('dom-action-accept');
+  const reject = document.getElementById('dom-action-reject');
+
+  if (!container || !text || !accept || !reject) return;
+
+  text.textContent = domAction.spoken_text || `Assistant suggests: ${domAction.action}`;
+  container.style.display = 'block';
+
+  const cleanup = () => { container.style.display = 'none'; accept.onclick = null; reject.onclick = null; };
+
+  accept.onclick = async () => {
+    try {
+      await sendRuntimeMessage({ action: 'confirm_dom_action', domAction, accept: true });
+    } catch (e) {
+      console.error(e);
+    } finally {
+      cleanup();
+    }
+  };
+
+  reject.onclick = async () => {
+    try {
+      await sendRuntimeMessage({ action: 'confirm_dom_action', domAction, accept: false });
+    } catch (e) {
+      console.error(e);
+    } finally {
+      cleanup();
+    }
   };
 }

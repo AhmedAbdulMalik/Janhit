@@ -26,7 +26,8 @@
  *   entities: Record<string, unknown>,
  *   nextQuestion: string | null,
  *   workflow: string | null,
- *   browserAction?: BrowserAction | null
+ *   browserAction?: BrowserAction | null,
+ *   domAction?: Record<string, unknown> | null
  * }} ProcessResponseData
  *
  * @typedef {{
@@ -76,7 +77,8 @@
  *   audio_mime_type?: string,
  *   data?: ProcessResponseData,
  *   form?: GeneratedForm,
- *   browserAction?: BrowserAction | null
+ *   browserAction?: BrowserAction | null,
+ *   domAction?: Record<string, unknown> | null
  * }} VoiceAssistResponse
  */
 

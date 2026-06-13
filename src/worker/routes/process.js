@@ -3,7 +3,23 @@
 import { generateGeminiJson } from '../lib/gemini.js';
 import { clamp, createJsonResponse, getNumber, getString, readJsonBody } from '../lib/http.js';
 import { INTENT_DETECTION_PROMPT, WORKFLOWS } from '../prompts/workflows.js';
+import { generateDomAction } from '../lib/dom_agent.js';
 
+/**
+ * @typedef {Record<string, unknown>} JsonRecord
+ */
+
+/**
+ * @typedef {{ step: number; question: string; required_fields: string[] }} WorkflowStep
+ * @typedef {{ id: string; name: string; description: string; category: string; examples: string[]; steps: WorkflowStep[] }} WorkflowDefinition
+ * @typedef {{ title?: string; visibleText?: string; elements?: Array<JsonRecord> }} PageSnapshot
+ * @typedef {{ page?: PageSnapshot; url?: string; currentUrl?: string; title?: string; visibleText?: string; elements?: Array<JsonRecord>; user_profile?: JsonRecord; viewport?: unknown; language?: string }} ContextRecord
+ */
+
+/**
+ * @param {Request} request
+ * @param {unknown} env
+ */
 export async function handleProcess(request, env) {
   try {
     const body = await readJsonBody(request);
@@ -36,6 +52,11 @@ export async function handleProcess(request, env) {
   }
 }
 
+/**
+ * @param {string} transcript
+ * @param {ContextRecord} context
+ * @param {unknown} env
+ */
 export async function processTranscript(transcript, context, env) {
   const fallback = classifyLocally(transcript, context);
   const prompt = [
@@ -62,49 +83,124 @@ export async function processTranscript(transcript, context, env) {
   return normalizeProcessResult(modelPayload, fallback, transcript, context);
 }
 
+/**
+ * @param {JsonRecord} payload
+ * @param {JsonRecord} fallback
+ * @param {string} transcript
+ * @param {ContextRecord} context
+ */
 function normalizeProcessResult(payload, fallback, transcript, context) {
-  const intent = normalizeIntent(getString(payload.intent), fallback.intent);
-  const workflow = getString(payload.workflow, intent);
-  const workflowDefinition = WORKFLOWS[intent] || null;
-  const entities = payload.entities && typeof payload.entities === 'object' && !Array.isArray(payload.entities)
-    ? { ...fallback.entities, ...sanitizeRecord(payload.entities) }
-    : fallback.entities;
+  const payloadSafe = /** @type {{ browserAction?: unknown; data?: unknown; confidence?: unknown; entities?: unknown; language?: unknown; workflow?: unknown; nextQuestion?: unknown; next_question?: unknown; responseText?: unknown; clarification_needed?: unknown; intent?: unknown }} */ (payload);
+  const fallbackSafe = /** @type {{ browserAction?: unknown; confidence?: unknown; entities?: unknown; responseText?: unknown; intent?: unknown }} */ (fallback);
+
+  const intent = normalizeIntent(getString(payloadSafe.intent), /** @type {string} */ (fallbackSafe.intent));
+  const workflow = getString(payloadSafe.workflow, intent);
+  const workflowDefinition = isWorkflowKey(intent) ? /** @type {WorkflowDefinition} */ (WORKFLOWS[intent]) : null;
+  const fallbackEntities = /** @type {JsonRecord} */ (fallbackSafe.entities && typeof fallbackSafe.entities === 'object' && !Array.isArray(fallbackSafe.entities) ? fallbackSafe.entities : {});
+  const payloadEntities = payloadSafe.entities && typeof payloadSafe.entities === 'object' && !Array.isArray(payloadSafe.entities)
+    ? /** @type {JsonRecord} */ (payloadSafe.entities)
+    : {};
+  const entities = payloadEntities && Object.keys(payloadEntities).length > 0
+    ? { ...fallbackEntities, ...sanitizeRecord(payloadEntities) }
+    : fallbackEntities;
 
   const missingFields = workflowDefinition ? getMissingFields(workflowDefinition, entities) : [];
   const nextQuestion = getString(
-    payload.nextQuestion,
-    getString(payload.next_question, workflowDefinition ? getDefaultQuestion(workflowDefinition, missingFields) : '')
+    payloadSafe.nextQuestion,
+    getString(payloadSafe.next_question, workflowDefinition ? getDefaultQuestion(workflowDefinition, missingFields) : '')
   );
 
+  const pageContext = context.page && typeof context.page === 'object' ? context.page : context;
+  const domAction = generateDomAction({
+    transcript,
+    detected_language: getString(payloadSafe.language) || getString(context.language) || 'en',
+    page_url: getString(context.url) || getString(context.currentUrl) || '',
+    page_title: getString(context.title) || '',
+    dom_snapshot: pageContext,
+    interactive_elements: Array.isArray(pageContext.elements) ? pageContext.elements : (Array.isArray(context.elements) ? context.elements : []),
+    user_profile: context.user_profile || {},
+    viewport: context.viewport || null,
+  });
+
   const responseText = getString(
-    payload.responseText,
-    workflowDefinition ? buildResponseText(workflowDefinition, entities, missingFields, nextQuestion) : getString(fallback.responseText, '')
+    payloadSafe.responseText,
+    workflowDefinition ? buildResponseText(workflowDefinition, entities, missingFields, nextQuestion) : getString(fallbackSafe.responseText, '')
   );
-  const browserAction = normalizeBrowserAction(payload.browserAction || payload.data?.browserAction) || normalizeBrowserAction(fallback.browserAction) || inferBrowserAction(transcript, intent, context);
+  // Detect and avoid naive echoing of the user's transcript.
+  let finalResponseText = responseText;
+  try {
+    const t = (transcript || '').trim();
+    const r = (responseText || '').trim();
+    const echoed = t && r && (r === t || r.includes(t) || t.includes(r));
+    if (echoed) {
+      // Prefer domAction spoken text if available
+      if (domAction && typeof domAction.spoken_text === 'string' && domAction.spoken_text.trim()) {
+        finalResponseText = domAction.spoken_text.trim();
+        console.debug('process: replaced echoed response with domAction.spoken_text');
+      } else if (context && typeof context.page === 'object' && typeof context.page.visibleText === 'string' && context.page.visibleText.trim()) {
+        finalResponseText = context.page.visibleText.trim().split('\n').map(s=>s.trim()).filter(Boolean).slice(0,6).join(' ');
+        console.debug('process: replaced echoed response with page visibleText summary');
+      } else if (nextQuestion) {
+        finalResponseText = nextQuestion;
+        console.debug('process: replaced echoed response with nextQuestion');
+      } else {
+        finalResponseText = 'I heard you — could you tell me which element or field on the page you want me to act on?';
+        console.debug('process: replaced echoed response with clarifying prompt');
+      }
+    }
+  } catch (e) {
+    // ignore errors in echo-detection
+  }
+
+  const browserAction = normalizeBrowserAction(
+    payloadSafe.browserAction ||
+    (payloadSafe.data && typeof payloadSafe.data === 'object' ? /** @type {{ browserAction?: unknown }} */ (payloadSafe.data).browserAction : undefined)
+  ) || normalizeBrowserAction(fallbackSafe.browserAction) || inferBrowserAction(transcript, intent, context);
 
   return {
     intent,
-    confidence: clamp(getNumber(payload.confidence, fallback.confidence), 0, 1),
+    confidence: clamp(getNumber(
+      typeof payloadSafe.confidence === 'number' ? payloadSafe.confidence : undefined,
+      typeof fallbackSafe.confidence === 'number' ? fallbackSafe.confidence : undefined
+    ), 0, 1),
     entities,
-    clarification_needed: typeof payload.clarification_needed === 'boolean'
-      ? payload.clarification_needed
+    clarification_needed: typeof payloadSafe.clarification_needed === 'boolean'
+      ? payloadSafe.clarification_needed
       : missingFields.length > 0,
     nextQuestion,
     workflow,
-    responseText,
+    responseText: finalResponseText,
     missingFields,
     browserAction,
+    domAction,
   };
 }
 
+/**
+ * @param {string} intent
+ * @param {string} fallbackIntent
+ * @returns {string}
+ */
 function normalizeIntent(intent, fallbackIntent) {
-  if (intent && WORKFLOWS[intent]) {
+  if (isWorkflowKey(intent)) {
     return intent;
   }
 
-  return WORKFLOWS[fallbackIntent] ? fallbackIntent : 'municipal_complaint';
+  return isWorkflowKey(fallbackIntent) ? fallbackIntent : 'municipal_complaint';
 }
 
+/**
+ * @param {unknown} value
+ * @returns {value is keyof typeof WORKFLOWS}
+ */
+function isWorkflowKey(value) {
+  return typeof value === 'string' && Object.prototype.hasOwnProperty.call(WORKFLOWS, value);
+}
+
+/**
+ * @param {unknown} rawAction
+ * @returns {JsonRecord | null}
+ */
 function normalizeBrowserAction(rawAction) {
   if (!rawAction || typeof rawAction !== 'object' || Array.isArray(rawAction)) {
     return null;
@@ -146,6 +242,11 @@ function normalizeBrowserAction(rawAction) {
   };
 }
 
+/**
+ * @param {string} transcript
+ * @param {ContextRecord} context
+ * @returns {JsonRecord}
+ */
 function classifyLocally(transcript, context) {
   const normalized = transcript.toLowerCase();
 
@@ -153,7 +254,8 @@ function classifyLocally(transcript, context) {
   const page = context && typeof context === 'object' ? context.page || context : null;
   const pageTitle = page && typeof page.title === 'string' ? page.title.toLowerCase() : '';
   const pageText = page && typeof page.visibleText === 'string' ? page.visibleText.toLowerCase() : '';
-  const elementLabels = Array.isArray(page?.elements) ? page.elements.map((e) => ((e && e.label) || e.name || e.text || '')).join(' ').toLowerCase() : '';
+  const elementArray = Array.isArray(page?.elements) ? /** @type {Array<JsonRecord>} */ (page.elements) : [];
+  const elementLabels = elementArray.map((e) => ((e && e.label) || e.name || e.text || '')).join(' ').toLowerCase();
 
   const isBanking = includesAny(normalized, [
     'bank', 'account', 'transaction', 'refund', 'upi', 'atm', 'deduct', 'deduction', 'unauthorized', 'unauthorised', 'ombudsman',
@@ -171,7 +273,7 @@ function classifyLocally(transcript, context) {
   else if (isFormPage) intent = 'form';
 
   const entities = extractEntities(transcript, intent, context);
-  const workflowDefinition = WORKFLOWS[intent] || null;
+  const workflowDefinition = isWorkflowKey(intent) ? /** @type {WorkflowDefinition} */ (WORKFLOWS[intent]) : null;
   const missingFields = workflowDefinition ? getMissingFields(workflowDefinition, entities) : [];
   const nextQuestion = workflowDefinition ? getDefaultQuestion(workflowDefinition, missingFields) : '';
 
@@ -200,8 +302,26 @@ function classifyLocally(transcript, context) {
   };
 }
 
+/**
+ * @param {string} transcript
+ * @param {string} intent
+ * @param {JsonRecord} context
+ * @returns {JsonRecord}
+ */
+/**
+ * @param {string} transcript
+ * @param {string} intent
+ * @param {JsonRecord} context
+ * @returns {JsonRecord}
+ */
+/**
+ * @param {string} transcript
+ * @param {string} intent
+ * @param {ContextRecord} context
+ * @returns {JsonRecord}
+ */
 function extractEntities(transcript, intent, context) {
-  const entities = {};
+  const entities = /** @type {JsonRecord} */ ({});
   const normalized = transcript.toLowerCase();
 
   if (intent === 'municipal_complaint') {
@@ -249,13 +369,24 @@ function extractEntities(transcript, intent, context) {
   return entities;
 }
 
-function inferBrowserAction(transcript, intent, context) {
-  if (!context || typeof context !== 'object' || !context.page || !Array.isArray(context.page.elements)) {
+/**
+ * @param {string} transcript
+ * @param {string} _intent
+ * @param {ContextRecord} context
+ * @returns {JsonRecord | null}
+ */
+function inferBrowserAction(transcript, _intent, context) {
+  if (!context || typeof context !== 'object') {
+    return null;
+  }
+
+  const pageContext = context.page && typeof context.page === 'object' ? context.page : null;
+  if (!pageContext || !Array.isArray(pageContext.elements)) {
     return null;
   }
 
   const normalized = transcript.toLowerCase();
-  const elements = /** @type {Array<Record<string, unknown>>} */ (context.page.elements);
+  const elements = /** @type {Array<Record<string, unknown>>} */ (pageContext.elements);
 
   const fieldTarget = findBestFieldElement(elements, normalized);
   if (fieldTarget && includesAny(normalized, ['fill', 'enter', 'type', 'set', 'update'])) {
@@ -263,7 +394,7 @@ function inferBrowserAction(transcript, intent, context) {
       type: 'fill_field',
       targetId: fieldTarget.id || null,
       targetSelector: fieldTarget.selector || '',
-      value: detectFillValue(normalized, fieldTarget) || '',
+      value: detectFillValue(normalized) || '',
       label: `Fill ${fieldTarget.label || fieldTarget.name || fieldTarget.text || 'field'}`,
     };
   }
@@ -307,6 +438,16 @@ function inferBrowserAction(transcript, intent, context) {
   return null;
 }
 
+/**
+ * @param {Array<JsonRecord>} elements
+ * @param {string} normalizedTranscript
+ * @returns {JsonRecord | null}
+ */
+/**
+ * @param {Array<JsonRecord>} elements
+ * @param {string} normalizedTranscript
+ * @returns {JsonRecord | null}
+ */
 function findBestFieldElement(elements, normalizedTranscript) {
   const fieldNames = ['email', 'phone', 'contact', 'name', 'address', 'description', 'account', 'bank', 'complaint', 'message'];
   for (const key of fieldNames) {
@@ -329,6 +470,16 @@ function findBestFieldElement(elements, normalizedTranscript) {
   }) || null;
 }
 
+/**
+ * @param {Array<JsonRecord>} elements
+ * @param {string} normalizedTranscript
+ * @returns {JsonRecord | null}
+ */
+/**
+ * @param {Array<JsonRecord>} elements
+ * @param {string} normalizedTranscript
+ * @returns {JsonRecord | null}
+ */
 function findBestClickableElement(elements, normalizedTranscript) {
   const clickableElements = elements.filter((element) => element.clickable === true || element.role === 'button' || element.role === 'link');
   if (!clickableElements.length) {
@@ -353,7 +504,21 @@ function findBestClickableElement(elements, normalizedTranscript) {
   return clickableElements[0] || null;
 }
 
-function detectFillValue(normalizedTranscript, element) {
+/**
+ * @param {string} normalizedTranscript
+ * @param {JsonRecord} element
+ * @returns {string}
+ */
+/**
+ * @param {string} normalizedTranscript
+ * @param {JsonRecord} element
+ * @returns {string}
+ */
+/**
+ * @param {string} normalizedTranscript
+ * @returns {string}
+ */
+function detectFillValue(normalizedTranscript) {
   if (normalizedTranscript.includes('email')) {
     return extractValue(normalizedTranscript, /([a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,})/i);
   }
@@ -370,16 +535,56 @@ function detectFillValue(normalizedTranscript, element) {
   return '';
 }
 
+/**
+ * @param {string} text
+ * @param {RegExp} pattern
+ * @returns {string}
+ */
+/**
+ * @param {string} text
+ * @param {RegExp} pattern
+ * @returns {string}
+ */
 function extractValue(text, pattern) {
   const match = text.match(pattern);
   return match && match[0] ? match[0].trim() : '';
 }
 
+/**
+ * @param {JsonRecord} workflowDefinition
+ * @param {JsonRecord} entities
+ * @returns {string[]}
+ */
+/**
+ * @param {JsonRecord} workflowDefinition
+ * @param {JsonRecord} entities
+ * @returns {string[]}
+ */
+/**
+ * @param {WorkflowDefinition} workflowDefinition
+ * @param {JsonRecord} entities
+ * @returns {string[]}
+ */
 function getMissingFields(workflowDefinition, entities) {
   const requiredFields = workflowDefinition.steps.flatMap((step) => step.required_fields);
   return [...new Set(requiredFields)].filter((field) => !getString(entities[field]));
 }
 
+/**
+ * @param {JsonRecord} workflowDefinition
+ * @param {string[]} missingFields
+ * @returns {string}
+ */
+/**
+ * @param {JsonRecord} workflowDefinition
+ * @param {string[]} missingFields
+ * @returns {string}
+ */
+/**
+ * @param {WorkflowDefinition} workflowDefinition
+ * @param {string[]} missingFields
+ * @returns {string}
+ */
 function getDefaultQuestion(workflowDefinition, missingFields) {
   if (missingFields.length === 0) {
     return 'I have enough details to prepare this complaint. Please review before submitting.';
@@ -389,6 +594,27 @@ function getDefaultQuestion(workflowDefinition, missingFields) {
   return matchingStep ? matchingStep.question : 'Please share one more detail so I can prepare this correctly.';
 }
 
+/**
+ * @param {JsonRecord} workflowDefinition
+ * @param {JsonRecord} entities
+ * @param {string[]} missingFields
+ * @param {string} nextQuestion
+ * @returns {string}
+ */
+/**
+ * @param {JsonRecord} workflowDefinition
+ * @param {JsonRecord} entities
+ * @param {string[]} missingFields
+ * @param {string} nextQuestion
+ * @returns {string}
+ */
+/**
+ * @param {WorkflowDefinition} workflowDefinition
+ * @param {JsonRecord} entities
+ * @param {string[]} missingFields
+ * @param {string} nextQuestion
+ * @returns {string}
+ */
 function buildResponseText(workflowDefinition, entities, missingFields, nextQuestion) {
   const issueText = getString(entities.complaint_type || entities.grievance_type);
 
@@ -399,6 +625,14 @@ function buildResponseText(workflowDefinition, entities, missingFields, nextQues
   return `I understood this as a ${workflowDefinition.name.toLowerCase()}. ${nextQuestion}`;
 }
 
+/**
+ * @param {JsonRecord} record
+ * @returns {JsonRecord}
+ */
+/**
+ * @param {JsonRecord} record
+ * @returns {JsonRecord}
+ */
 function sanitizeRecord(record) {
   return Object.fromEntries(
     Object.entries(record)
@@ -407,6 +641,18 @@ function sanitizeRecord(record) {
   );
 }
 
+/**
+ * @param {unknown} value
+ * @returns {unknown}
+ */
+/**
+ * @param {unknown} value
+ * @returns {unknown}
+ */
+/**
+ * @param {unknown} value
+ * @returns {unknown}
+ */
 function sanitizeValue(value) {
   if (typeof value === 'string') {
     return value.slice(0, 1000).trim();
@@ -421,12 +667,17 @@ function sanitizeValue(value) {
   }
 
   if (value && typeof value === 'object') {
-    return sanitizeRecord(value);
+    return sanitizeRecord(/** @type {JsonRecord} */ (value));
   }
 
   return '';
 }
 
+/**
+ * @param {string} value
+ * @param {string[]} terms
+ * @returns {boolean}
+ */
 function includesAny(value, terms) {
   return terms.some((term) => value.includes(term));
 }

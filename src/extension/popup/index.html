@@ -10,21 +10,33 @@
   <div class="container">
     <div class="header">
       <h1>Janhit</h1>
+      <p class="subtitle">Hold to talk. Release to process.</p>
     </div>
 
     <div class="voice-control">
-      <button id="voice-btn" class="voice-btn" title="Click to start voice input or use Ctrl+Alt (Windows) / Control+Option (Mac)">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <button
+        id="voice-btn"
+        class="voice-btn"
+        type="button"
+        aria-pressed="false"
+        title="Press and hold to record. Shortcut: hold Ctrl+Alt on Windows/Linux or Control+Option on Mac while this popup is focused."
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
           <path d="M12 1a3 3 0 0 0-3 3v12a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
           <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
           <line x1="12" y1="19" x2="12" y2="23"></line>
           <line x1="8" y1="23" x2="16" y2="23"></line>
         </svg>
       </button>
-      <p class="toggle-label" id="toggle-label">Voice OFF</p>
-      <p class="status-text" id="status">Click the button or hold the shortcut to toggle voice control.</p>
-      <p class="shortcut-text">Windows: <strong>Ctrl + Alt</strong></p>
-      <p class="shortcut-text">Mac: <strong>Control + Option</strong></p>
+      <p class="toggle-label" id="toggle-label">Ready</p>
+      <p class="status-text" id="status">Press and hold the mic button to start a real microphone capture.</p>
+      <p class="shortcut-text">Hold <strong>Ctrl + Alt</strong> on Windows/Linux</p>
+      <p class="shortcut-text">Hold <strong>Control + Option</strong> on Mac</p>
+    </div>
+
+    <div class="assistant-panel">
+      <p class="assistant-heading">Voice Flow</p>
+      <p class="assistant-copy" id="response-text">Press and hold to send your speech to Janhit.</p>
     </div>
   </div>
 

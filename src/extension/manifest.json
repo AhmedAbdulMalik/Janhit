@@ -2,28 +2,22 @@
   "manifest_version": 3,
   "name": "Janhit - AI Civic Assistant",
   "version": "1.0.0",
-  "description": "Voice-powered AI assistant to help citizens navigate government forms and grievance systems",
+  "description": "Voice-first civic assistant. Hold Ctrl + Space to speak.",
   "permissions": [
-    "activeTab",
-    "scripting",
-    "storage",
-    "tabs"
+    "offscreen",
+    "microphone",
+    "storage"
   ],
   "host_permissions": [
     "<all_urls>"
   ],
-  "action": {
-    "default_popup": "popup/index.html",
-    "default_title": "Janhit"
-  },
   "background": {
     "service_worker": "background/service-worker.js"
   },
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["content-scripts/content.js"],
-      "run_at": "document_start"
+      "js": ["content-scripts/ptt.js"]
     }
   ]
 }

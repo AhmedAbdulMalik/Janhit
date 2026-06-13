@@ -1,0 +1,18 @@
+{
+  "name": "janhit",
+  "version": "1.0.0",
+  "description": "Voice-first AI civic assistant Chrome extension and Cloudflare Worker backend.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "node scripts/build-extension.mjs",
+    "dev:worker": "wrangler dev src/worker/index.js --local",
+    "deploy:worker": "wrangler deploy src/worker/index.js"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.202605.1",
+    "typescript": "^5.8.3",
+    "wrangler": "^4.17.0"
+  }
+}

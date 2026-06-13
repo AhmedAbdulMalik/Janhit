@@ -294,42 +294,42 @@ function renderVoiceUi() {
 
   if (currentState.state === 'requesting-permission') {
     elements.toggleLabel.textContent = 'Grant Access';
-    elements.statusText.textContent = 'Approve microphone permission to let Janhit start listening.';
+    elements.statusText.textContent = 'Approve microphone permission to start.';
     return;
   }
 
   if (currentState.state === 'listening') {
     elements.voiceButton.classList.add('listening');
     elements.toggleLabel.textContent = 'Listening';
-    elements.statusText.textContent = 'Recording live audio now. Release the button to stop.';
+    elements.statusText.textContent = 'Listening for your command.';
     return;
   }
 
   if (currentState.state === 'processing') {
     elements.voiceButton.classList.add('processing');
     elements.toggleLabel.textContent = 'Processing';
-    elements.statusText.textContent = 'Audio capture finished. Preparing the recording for the next AI step.';
+    elements.statusText.textContent = 'Processing your request.';
     return;
   }
 
   if (currentState.state === 'transcribing') {
     elements.voiceButton.classList.add('processing');
     elements.toggleLabel.textContent = 'Transcribing';
-    elements.statusText.textContent = 'Sending your speech to the worker for Sarvam transcription.';
+    elements.statusText.textContent = 'Converting speech to text.';
     return;
   }
 
   if (currentState.state === 'thinking') {
     elements.voiceButton.classList.add('processing');
     elements.toggleLabel.textContent = 'Thinking';
-    elements.statusText.textContent = 'Understanding your request and preparing the reply.';
+    elements.statusText.textContent = 'Finding the right page action.';
     return;
   }
 
   if (currentState.state === 'speaking') {
     elements.voiceButton.classList.add('processing');
     elements.toggleLabel.textContent = 'Speaking';
-    elements.statusText.textContent = 'Voice reply is being generated and played back. Clicky Buddy is pointing it out.';
+    elements.statusText.textContent = 'Reply ready.';
     return;
   }
 
@@ -341,7 +341,7 @@ function renderVoiceUi() {
   }
 
   elements.toggleLabel.textContent = 'Ready';
-  elements.statusText.textContent = 'Press and hold the mic button to talk to Janhit.';
+  elements.statusText.textContent = 'Press and hold to talk.';
 }
 
 /**

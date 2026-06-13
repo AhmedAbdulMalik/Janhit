@@ -27,7 +27,7 @@ export async function handleGenerateForm(request) {
 }
 
 export function generateFormDraft(intent, data) {
-  const workflow = WORKFLOWS[intent] || WORKFLOWS.municipal_complaint;
+  const workflow = WORKFLOWS[intent] || { name: 'General Request', category: 'General' };
   const fields = getFieldsForIntent(intent);
   const values = Object.fromEntries(fields.map((field) => [field.name, getString(data[field.name])]));
   const missingFields = fields.filter((field) => field.required && !values[field.name]).map((field) => field.name);
@@ -47,61 +47,30 @@ export function generateFormDraft(intent, data) {
 }
 
 function getFieldsForIntent(intent) {
-  if (intent === 'banking_grievance') {
-    return [
-      { name: 'bank_name', label: 'Bank Name', type: 'text', required: true },
-      { name: 'account_number', label: 'Account Number', type: 'text', required: false },
-      { name: 'grievance_type', label: 'Type of Grievance', type: 'select', required: true, options: ['unauthorized_transaction', 'failed_refund', 'double_deduction', 'service_issue'] },
-      { name: 'description', label: 'Detailed Description', type: 'textarea', required: true },
-      { name: 'contact_number', label: 'Contact Number', type: 'tel', required: true },
-      { name: 'email', label: 'Email', type: 'email', required: true },
-    ];
-  }
-
   return [
-    { name: 'complaint_type', label: 'Type of Complaint', type: 'select', required: true, options: ['broken_streetlight', 'garbage_collection', 'water_supply', 'road_damage', 'drainage'] },
-    { name: 'location', label: 'Location/Address', type: 'text', required: true },
-    { name: 'description', label: 'Detailed Description', type: 'textarea', required: true },
-    { name: 'contact_number', label: 'Contact Number', type: 'tel', required: true },
+    { name: 'title', label: 'Title', type: 'text', required: false },
+    { name: 'description', label: 'Description', type: 'textarea', required: true },
+    { name: 'url', label: 'URL', type: 'text', required: false },
   ];
 }
 
 function createDraft(intent, data) {
-  if (intent === 'banking_grievance') {
-    return [
-      'Subject: Banking grievance request',
-      '',
-      `Bank: ${getString(data.bank_name, 'Not provided')}`,
-      `Grievance Type: ${formatValue(data.grievance_type)}`,
-      `Account Reference: ${maskAccountNumber(getString(data.account_number, 'Not provided'))}`,
-      '',
-      'Details:',
-      getString(data.description, 'The complainant has requested assistance with a banking grievance.'),
-      '',
-      `Contact Number: ${getString(data.contact_number, 'Not provided')}`,
-      `Email: ${getString(data.email, 'Not provided')}`,
-      '',
-      'I request the concerned authority to review this matter and provide a written resolution at the earliest.',
-    ].join('\n');
-  }
-
   return [
-    'Subject: Municipal complaint request',
+    'Subject: General assistance request',
     '',
-    `Complaint Type: ${formatValue(data.complaint_type)}`,
-    `Location: ${getString(data.location, 'Not provided')}`,
+    `Title: ${getString(data.title, 'Not provided')}`,
     '',
     'Details:',
-    getString(data.description, 'The complainant has requested assistance with a municipal issue.'),
+    getString(data.description, 'The user has requested help with the current page.'),
     '',
-    `Contact Number: ${getString(data.contact_number, 'Not provided')}`,
+    `URL: ${getString(data.url, 'Not provided')}`,
     '',
-    'I request the concerned municipal authority to inspect the location and resolve this issue as soon as possible.',
+    'I request assistance based on the user’s current page and transcript.',
   ].join('\n');
 }
 
 function normalizeIntent(intent) {
-  return WORKFLOWS[intent] ? intent : 'municipal_complaint';
+  return intent || 'general';
 }
 
 function sanitizeData(data) {

@@ -66,9 +66,6 @@ export async function processTranscript(transcript, context, env) {
     'Current browser/context JSON:',
     JSON.stringify(context),
     '',
-    'Supported workflows JSON:',
-    JSON.stringify(WORKFLOWS),
-    '',
     'Return only JSON with keys: intent, confidence, entities, clarification_needed, nextQuestion, workflow, responseText, browserAction.',
   ].join('\n');
 
@@ -124,33 +121,9 @@ function normalizeProcessResult(payload, fallback, transcript, context) {
 
   const responseText = getString(
     payloadSafe.responseText,
-    workflowDefinition ? buildResponseText(workflowDefinition, entities, missingFields, nextQuestion) : getString(fallbackSafe.responseText, '')
+    workflowDefinition ? buildResponseText(workflowDefinition, entities, missingFields, nextQuestion) : buildGeneralResponse(transcript, domAction, context, nextQuestion)
   );
-  // Detect and avoid naive echoing of the user's transcript.
-  let finalResponseText = responseText;
-  try {
-    const t = (transcript || '').trim();
-    const r = (responseText || '').trim();
-    const echoed = t && r && (r === t || r.includes(t) || t.includes(r));
-    if (echoed) {
-      // Prefer domAction spoken text if available
-      if (domAction && typeof domAction.spoken_text === 'string' && domAction.spoken_text.trim()) {
-        finalResponseText = domAction.spoken_text.trim();
-        console.debug('process: replaced echoed response with domAction.spoken_text');
-      } else if (context && typeof context.page === 'object' && typeof context.page.visibleText === 'string' && context.page.visibleText.trim()) {
-        finalResponseText = context.page.visibleText.trim().split('\n').map(s=>s.trim()).filter(Boolean).slice(0,6).join(' ');
-        console.debug('process: replaced echoed response with page visibleText summary');
-      } else if (nextQuestion) {
-        finalResponseText = nextQuestion;
-        console.debug('process: replaced echoed response with nextQuestion');
-      } else {
-        finalResponseText = 'I heard you — could you tell me which element or field on the page you want me to act on?';
-        console.debug('process: replaced echoed response with clarifying prompt');
-      }
-    }
-  } catch (e) {
-    // ignore errors in echo-detection
-  }
+  const finalResponseText = avoidEchoResponse(transcript, responseText, domAction, context, nextQuestion);
 
   const browserAction = normalizeBrowserAction(
     payloadSafe.browserAction ||
@@ -182,11 +155,15 @@ function normalizeProcessResult(payload, fallback, transcript, context) {
  * @returns {string}
  */
 function normalizeIntent(intent, fallbackIntent) {
-  if (isWorkflowKey(intent)) {
-    return intent;
+  if (typeof intent === 'string' && intent.trim()) {
+    return intent.trim();
   }
 
-  return isWorkflowKey(fallbackIntent) ? fallbackIntent : 'municipal_complaint';
+  if (typeof fallbackIntent === 'string' && fallbackIntent.trim()) {
+    return fallbackIntent.trim();
+  }
+
+  return 'general';
 }
 
 /**
@@ -257,41 +234,21 @@ function classifyLocally(transcript, context) {
   const elementArray = Array.isArray(page?.elements) ? /** @type {Array<JsonRecord>} */ (page.elements) : [];
   const elementLabels = elementArray.map((e) => ((e && e.label) || e.name || e.text || '')).join(' ').toLowerCase();
 
-  const isBanking = includesAny(normalized, [
-    'bank', 'account', 'transaction', 'refund', 'upi', 'atm', 'deduct', 'deduction', 'unauthorized', 'unauthorised', 'ombudsman',
-  ]) || includesAny(pageTitle + ' ' + pageText + ' ' + elementLabels, ['bank', 'account', 'transaction', 'refund', 'upi', 'atm']);
-
-  const isMunicipal = includesAny(normalized, ['municipal', 'complaint', 'panchayat', 'ward', 'civic']) || includesAny(pageTitle + ' ' + pageText + ' ' + elementLabels, ['municipal', 'complaint', 'civic', 'ward']);
-
   const formLike = Array.isArray(page?.elements) && page.elements.length >= 2;
-  const formKeywords = ['form', 'registration', 'sign up', 'apply', 'survey', 'your answer', 'email', 'name', 'mobile'];
+  const formKeywords = ['form', 'registration', 'sign up', 'apply', 'survey', 'your answer', 'email', 'name', 'mobile', 'search', 'url', 'link'];
   const isFormPage = formLike || includesAny(pageTitle + ' ' + pageText + ' ' + elementLabels, formKeywords);
 
-  let intent = 'general';
-  if (isBanking) intent = 'banking_grievance';
-  else if (isMunicipal) intent = 'municipal_complaint';
-  else if (isFormPage) intent = 'form';
+  const intent = isFormPage ? 'form' : 'general';
 
   const entities = extractEntities(transcript, intent, context);
   const workflowDefinition = isWorkflowKey(intent) ? /** @type {WorkflowDefinition} */ (WORKFLOWS[intent]) : null;
   const missingFields = workflowDefinition ? getMissingFields(workflowDefinition, entities) : [];
-  const nextQuestion = workflowDefinition ? getDefaultQuestion(workflowDefinition, missingFields) : '';
-
-  // If the page looks like a form, create a short descriptive response.
-  let responseText = '';
-  if (workflowDefinition) {
-    responseText = buildResponseText(workflowDefinition, entities, missingFields, nextQuestion);
-  } else if (intent === 'form') {
-    const title = page && page.title ? page.title : 'this page';
-    const fieldNames = Array.isArray(page?.elements) ? page.elements.slice(0,5).map((e) => e.label || e.name || e.placeholder || e.text).filter(Boolean) : [];
-    responseText = `This looks like a form titled ${title}. Primary fields: ${fieldNames.join(', ') || 'not listed'}.`;
-  } else {
-    responseText = getString(entities.description || transcript, transcript).slice(0, 400);
-  }
+  const nextQuestion = '';
+  const responseText = buildGeneralResponse(transcript, null, context, '');
 
   return {
     intent,
-    confidence: isBanking ? 0.78 : isMunicipal ? 0.75 : 0.72,
+    confidence: 0.72,
     entities,
     clarification_needed: missingFields.length > 0,
     nextQuestion,
@@ -323,28 +280,6 @@ function classifyLocally(transcript, context) {
 function extractEntities(transcript, intent, context) {
   const entities = /** @type {JsonRecord} */ ({});
   const normalized = transcript.toLowerCase();
-
-  if (intent === 'municipal_complaint') {
-    if (includesAny(normalized, ['streetlight', 'street light', 'light'])) {
-      entities.complaint_type = 'broken_streetlight';
-    } else if (includesAny(normalized, ['garbage', 'waste', 'trash'])) {
-      entities.complaint_type = 'garbage_collection';
-    } else if (includesAny(normalized, ['water', 'supply', 'pipeline'])) {
-      entities.complaint_type = 'water_supply';
-    } else if (includesAny(normalized, ['road', 'pothole', 'drainage', 'sewage'])) {
-      entities.complaint_type = includesAny(normalized, ['drainage', 'sewage']) ? 'drainage' : 'road_damage';
-    }
-  }
-
-  if (intent === 'banking_grievance') {
-    if (includesAny(normalized, ['unauthorized', 'unauthorised', 'fraud'])) {
-      entities.grievance_type = 'unauthorized_transaction';
-    } else if (includesAny(normalized, ['refund', 'failed'])) {
-      entities.grievance_type = 'failed_refund';
-    } else if (includesAny(normalized, ['double', 'deduct', 'deduction'])) {
-      entities.grievance_type = 'double_deduction';
-    }
-  }
 
   const locationMatch = transcript.match(/\b(?:at|near|in|from)\s+([A-Za-z0-9\s,.-]{3,80})/i);
   if (locationMatch && locationMatch[1]) {
@@ -438,6 +373,41 @@ function inferBrowserAction(transcript, _intent, context) {
   return null;
 }
 
+function buildGeneralResponse(transcript, domAction, context, nextQuestion) {
+  if (domAction && typeof domAction.spoken_text === 'string' && domAction.spoken_text.trim()) {
+    return domAction.spoken_text.trim();
+  }
+
+  const page = context && typeof context === 'object' ? context.page || context : null;
+  const pageTitle = page && typeof page.title === 'string' ? page.title.trim() : '';
+
+  if (pageTitle) {
+    return `I’m looking at ${pageTitle}. ${nextQuestion || 'Tell me which element or field you want me to find.'}`.trim();
+  }
+
+  if (includesAny(transcript.toLowerCase(), ['where', 'search', 'url', 'link', 'button', 'field', 'input'])) {
+    return 'Tell me which element or field on the page you want me to find.';
+  }
+
+  return 'Tell me what you want me to do on the current page.';
+}
+
+function avoidEchoResponse(transcript, responseText, domAction, context, nextQuestion) {
+  const rawTranscript = (transcript || '').trim().toLowerCase();
+  const rawResponse = (responseText || '').trim();
+
+  if (!rawResponse) {
+    return buildGeneralResponse(transcript, domAction, context, nextQuestion);
+  }
+
+  const normalizedResponse = rawResponse.toLowerCase();
+  if (rawTranscript && (normalizedResponse === rawTranscript || normalizedResponse.includes(rawTranscript))) {
+    return buildGeneralResponse(transcript, domAction, context, nextQuestion);
+  }
+
+  return rawResponse;
+}
+
 /**
  * @param {Array<JsonRecord>} elements
  * @param {string} normalizedTranscript
@@ -449,7 +419,7 @@ function inferBrowserAction(transcript, _intent, context) {
  * @returns {JsonRecord | null}
  */
 function findBestFieldElement(elements, normalizedTranscript) {
-  const fieldNames = ['email', 'phone', 'contact', 'name', 'address', 'description', 'account', 'bank', 'complaint', 'message'];
+  const fieldNames = ['email', 'phone', 'contact', 'name', 'address', 'description', 'search', 'url', 'link', 'message'];
   for (const key of fieldNames) {
     if (normalizedTranscript.includes(key)) {
       const matching = elements.find((element) => {
@@ -587,7 +557,7 @@ function getMissingFields(workflowDefinition, entities) {
  */
 function getDefaultQuestion(workflowDefinition, missingFields) {
   if (missingFields.length === 0) {
-    return 'I have enough details to prepare this complaint. Please review before submitting.';
+    return 'I have enough details to continue. Please review before submitting.';
   }
 
   const matchingStep = workflowDefinition.steps.find((step) => step.required_fields.some((field) => missingFields.includes(field)));
@@ -616,13 +586,11 @@ function getDefaultQuestion(workflowDefinition, missingFields) {
  * @returns {string}
  */
 function buildResponseText(workflowDefinition, entities, missingFields, nextQuestion) {
-  const issueText = getString(entities.complaint_type || entities.grievance_type);
-
   if (missingFields.length === 0) {
-    return `I understood this as a ${workflowDefinition.name.toLowerCase()}${issueText ? ` about ${issueText.replaceAll('_', ' ')}` : ''}. I can prepare the draft now.`;
+    return `I understood this as ${workflowDefinition.name.toLowerCase()}. I can continue now.`;
   }
 
-  return `I understood this as a ${workflowDefinition.name.toLowerCase()}. ${nextQuestion}`;
+  return `I understood this as ${workflowDefinition.name.toLowerCase()}. ${nextQuestion}`;
 }
 
 /**

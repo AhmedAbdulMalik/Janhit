@@ -8,6 +8,7 @@ function sanitizeText(value) {
 function findBestElement(elements, needle) {
   if (!Array.isArray(elements) || !needle) return null;
   const key = needle.toLowerCase();
+  const normalizedNeedle = key.replace(/^(the|a|an)\s+/, '');
   // Score candidates by label/name/text/includes order
   let best = null;
   let bestScore = 0;
@@ -19,6 +20,7 @@ function findBestElement(elements, needle) {
     if (!hay) continue;
     if (hay === key) score += 10;
     if (hay.includes(key)) score += 6;
+    if (normalizedNeedle && hay.includes(normalizedNeedle)) score += 8;
     // token matches
     const tokens = key.split(/\s+/).filter(Boolean);
     for (const t of tokens) {
@@ -80,6 +82,20 @@ export function generateDomAction(params) {
     follow_up: null,
   };
 
+  const isSearchRequest = /(search|search for|search box|url|link|find url|where to search|where can i search|search input|search field)/i.test(transcript);
+  const isGeneralLocateRequest = /(where is|where's|locate|find|show me|point to|highlight)/i.test(transcript);
+  const elementHint = (() => {
+    const q = extractQuoted(transcript);
+    if (q) return q;
+    const stripped = transcript
+      .replace(/^(can you|could you|please|hey|hi)\b/i, '')
+      .replace(/\b(show me|point to|where is|where's|locate|find|highlight|focus on|click|open|go to)\b/i, '')
+      .replace(/\b(the|a|an)\b/i, '')
+      .replace(/\b(button|link|field|input|box|search|url|menu|tab)\b/i, '')
+      .trim();
+    return stripped || transcript.split(/[.,?]/)[0];
+  })();
+
   // Helper to build selector preference
   function bestSelectorFor(el) {
     if (!el) return null;
@@ -103,26 +119,26 @@ export function generateDomAction(params) {
     result.action = 'answer_question';
     result.target_selector = null;
     result.scroll_first = false;
-    result.follow_up = 'Do you want me to highlight a section or find a specific field?';
+    result.follow_up = 'Want me to find or highlight something?';
     return result;
   }
 
   // For element-targeting actions, attempt to find best element
   const targetHint = (() => {
-    // Try quoted text, then key phrases
-    const q = extractQuoted(transcript);
-    if (q) return q;
-    // common phrases like 'submit button', 'email field'
-    const candidates = transcript.match(/(?:the\s)?([\w\s'-]{2,60})(?: button| link| field| input| section| area| form)?/i);
+    if (isSearchRequest || isGeneralLocateRequest) {
+      return elementHint;
+    }
+
+    const candidates = transcript.match(/(?:the\s)?([\w\s'-]{2,80})(?: button| link| field| input| section| area| form| box| search)?/i);
     if (candidates && candidates[1]) return candidates[1].trim();
-    return transcript.split(/[.,?]/)[0];
+    return elementHint;
   })();
 
   const best = findBestElement(interactive, targetHint || transcript);
   if (!best) {
     result.action = 'none';
-    result.spoken_text = `I couldn't find an element matching "${targetHint || transcript}" on this page. Could you describe it differently?`;
-    result.follow_up = 'Can you describe the element by its label or visible text?';
+    result.spoken_text = `I couldn’t find "${targetHint || transcript}" on this page.`;
+    result.follow_up = 'Try the label or visible text.';
     return result;
   }
 
@@ -131,16 +147,16 @@ export function generateDomAction(params) {
 
   if (action === 'highlight') {
     result.action = 'highlight';
-    result.spoken_text = `I found ${best.label || best.text || 'the element'} and will highlight it.`;
+    result.spoken_text = `Found ${best.label || best.text || 'the element'}.`;
     result.target_selector = selector;
     result.scroll_first = !!offscreen;
-    result.follow_up = 'Do you want me to focus or click it?';
+    result.follow_up = 'Focus or click it?';
     return result;
   }
 
   if (action === 'scroll') {
     result.action = 'scroll';
-    result.spoken_text = `I will scroll to ${best.label || best.text || 'the element'}.`;
+    result.spoken_text = `Scrolling to ${best.label || best.text || 'the element'}.`;
     result.target_selector = selector;
     result.scroll_first = true;
     result.follow_up = null;
@@ -149,7 +165,7 @@ export function generateDomAction(params) {
 
   if (action === 'focus') {
     result.action = 'focus';
-    result.spoken_text = `I will focus ${best.label || best.placeholder || 'the input'}.`;
+    result.spoken_text = `Focusing ${best.label || best.placeholder || 'the input'}.`;
     result.target_selector = selector;
     result.scroll_first = !!offscreen;
     return result;
@@ -160,13 +176,13 @@ export function generateDomAction(params) {
     const dangerous = /(delete|remove|cancel|close|danger|destroy)/i;
     if (dangerous.test(best.label || best.text || '')) {
       result.action = 'none';
-      result.spoken_text = `That button looks potentially destructive (${best.label || best.text}). Please confirm before I click.`;
-      result.follow_up = 'Do you want me to click it?';
+      result.spoken_text = `That looks destructive (${best.label || best.text}).`;
+      result.follow_up = 'Click anyway?';
       return result;
     }
 
     result.action = 'click';
-    result.spoken_text = `I will click ${best.label || best.text || 'the element'} for you.`;
+    result.spoken_text = `Clicking ${best.label || best.text || 'the element'}.`;
     result.target_selector = selector;
     result.scroll_first = !!offscreen;
     return result;
@@ -209,24 +225,24 @@ export function generateDomAction(params) {
 
     if (fills.length === 0) {
       result.action = 'none';
-      result.spoken_text = `I couldn't determine what to fill from your request. Could you tell me which field to fill or provide the value?`;
-      result.follow_up = 'Which field would you like me to fill?';
+      result.spoken_text = `I couldn’t determine the fill value.`;
+      result.follow_up = 'Which field should I fill?';
       return result;
     }
 
     result.action = 'fill_form';
-    result.spoken_text = `I prepared ${fills.length} field(s) to fill.`;
+    result.spoken_text = `Ready to fill ${fills.length} field(s).`;
     result.fills = fills;
     result.target_selector = null;
     result.scroll_first = false;
-    result.follow_up = 'Do you want me to fill these fields now?';
+    result.follow_up = 'Fill them now?';
     return result;
   }
 
   // fallback
   result.action = 'none';
-  result.spoken_text = `I couldn't map your request to an action on this page. Please clarify.`;
-  result.follow_up = 'Can you be more specific?';
+  result.spoken_text = `I couldn’t map that to a page action.`;
+  result.follow_up = 'Be more specific?';
   return result;
 }
 

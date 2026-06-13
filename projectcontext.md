@@ -372,7 +372,7 @@ Make civic action as easy as having a conversation.
 Janhit - Empowering Citizens Through AI
 
 
-ilet me tell again what is this ai assitant that guide user based on voice frist input . when user hold input shortcut. ai listen what user telling and respone back.
+let me tell again what is this ai assitant that guide user based on voice frist input . when user hold input shortcut. ai listen what user telling and respone back.
 
 it similar to clickly-ai.com
 

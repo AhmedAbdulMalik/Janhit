@@ -2,22 +2,36 @@
   "manifest_version": 3,
   "name": "Janhit - AI Civic Assistant",
   "version": "1.0.0",
-  "description": "Voice-first civic assistant. Hold Ctrl + Space to speak.",
+  "description": "Voice-first civic assistant. Hold Ctrl + Alt to speak, or press the popup mic.",
   "permissions": [
     "offscreen",
     "microphone",
-    "storage"
+    "storage",
+    "activeTab",
+    "scripting"
   ],
   "host_permissions": [
     "<all_urls>"
   ],
   "background": {
-    "service_worker": "background/service-worker.js"
+    "service_worker": "background/service-worker.js",
+    "type": "module"
   },
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["content-scripts/ptt.js"]
+      "js": ["content-scripts/content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_title": "Janhit",
+    "default_popup": "popup/index.html"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["offscreen/index.html"],
+      "matches": ["<all_urls>"]
     }
   ]
 }

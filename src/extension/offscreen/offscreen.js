@@ -220,13 +220,17 @@ async function playResponseAudio(audioDataUrl) {
  * @param {string | null} error
  */
 async function notifyBackgroundState(state, error = null) {
-  await chrome.runtime.sendMessage({
-    action: 'voice_capture_state_changed',
-    source: 'offscreen',
-    target: 'background',
-    state,
-    error,
-  });
+  try {
+    await chrome.runtime.sendMessage({
+      action: 'voice_capture_state_changed',
+      source: 'offscreen',
+      target: 'background',
+      state,
+      error,
+    });
+  } catch (error) {
+    console.error('Unable to notify background of offscreen state:', error);
+  }
 }
 
 function getSupportedMimeType() {
@@ -271,3 +275,4 @@ function blobToDataUrl(blob) {
     reader.readAsDataURL(blob);
   });
 }
+

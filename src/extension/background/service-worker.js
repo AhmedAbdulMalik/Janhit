@@ -423,8 +423,8 @@ async function ensureOffscreenDocument() {
 
       await chrome.offscreen.createDocument({
         url: OFFSCREEN_DOCUMENT_PATH,
-        reasons: ['USER_MEDIA'],
-        justification: 'Required for Janhit push-to-talk microphone capture.',
+        reasons: ['USER_MEDIA', 'AUDIO_PLAYBACK'],
+        justification: 'Required for Janhit push-to-talk microphone capture and voice reply playback.',
       });
     } catch (error) {
       console.error('Failed to create offscreen document:', error);

@@ -5,6 +5,7 @@
   "description": "Voice-driven browser companion with an in-page blue cursor overlay, safe DOM actions, and secure AI backend proxying.",
   "permissions": [
     "offscreen",
+    "audioCapture",
     "storage",
     "activeTab",
     "scripting"

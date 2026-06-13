@@ -26,7 +26,8 @@ const OFFSCREEN_DOCUMENT_PATH = 'offscreen/index.html';
  *   responseText: string,
  *   workflow: string | null,
  *   confidence: number | null,
- *   form?: unknown
+ *   form?: unknown,
+ *   browserAction?: unknown
  * }} VoiceAssistantResult
  */
 
@@ -217,8 +218,13 @@ async function processAssistantRequest(capture) {
   assistantProcessingPromise = (async () => {
     try {
       const audioBlob = await dataUrlToBlob(capture.audioDataUrl);
+      const activeTab = await getActiveHttpTab();
+      const pageContext = activeTab ? await getPageContext(activeTab.id) : null;
+
       const voiceAssistResponse = await api.voiceAssist(audioBlob, 'hi-IN', {
-        currentUrl: getCurrentTabUrl(),
+        currentUrl: activeTab?.url || 'unknown',
+        currentTitle: activeTab?.title || '',
+        page: pageContext,
       }, {
         signal: assistantAbortController.signal,
       });
@@ -239,7 +245,10 @@ async function processAssistantRequest(capture) {
         result: assistantResult,
       });
 
-      await autofillCurrentForm(assistantResult);
+      if (activeTab?.id) {
+        await executeBrowserAction(activeTab.id, assistantResult.browserAction);
+        await autofillCurrentForm(activeTab.id, assistantResult);
+      }
 
       if (typeof voiceAssistResponse.audio_url === 'string' && voiceAssistResponse.audio_url) {
         await chrome.runtime.sendMessage({
@@ -336,18 +345,12 @@ async function ensureOffscreenDocument() {
 }
 
 /**
+ * @param {number} tabId
  * @param {VoiceAssistantResult} result
  */
-async function autofillCurrentForm(result) {
+async function autofillCurrentForm(tabId, result) {
   try {
-    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-    const activeTab = tabs[0];
-
-    if (!activeTab?.id || !activeTab.url?.startsWith('http')) {
-      return;
-    }
-
-    await chrome.tabs.sendMessage(activeTab.id, {
+    await chrome.tabs.sendMessage(tabId, {
       action: 'autofill_form',
       source: 'background',
       target: 'content',
@@ -358,8 +361,65 @@ async function autofillCurrentForm(result) {
   }
 }
 
-function getCurrentTabUrl() {
-  return 'unknown';
+/**
+ * @returns {Promise<chrome.tabs.Tab | null>}
+ */
+async function getActiveHttpTab() {
+  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+  const activeTab = tabs[0];
+
+  if (!activeTab?.id || !activeTab.url?.startsWith('http')) {
+    return null;
+  }
+
+  return activeTab;
+}
+
+/**
+ * @param {number} tabId
+ * @returns {Promise<Record<string, unknown> | null>}
+ */
+async function getPageContext(tabId) {
+  try {
+    const response = await chrome.tabs.sendMessage(tabId, {
+      action: 'get_page_context',
+      source: 'background',
+      target: 'content',
+    });
+
+    if (response && typeof response === 'object') {
+      const candidate = /** @type {{ success?: unknown, context?: unknown }} */ (response);
+
+      if (candidate.success === true && candidate.context && typeof candidate.context === 'object') {
+        return /** @type {Record<string, unknown>} */ (candidate.context);
+      }
+    }
+  } catch {
+    // Some pages cannot receive content-script messages; the assistant can still answer from voice.
+  }
+
+  return null;
+}
+
+/**
+ * @param {number} tabId
+ * @param {unknown} browserAction
+ */
+async function executeBrowserAction(tabId, browserAction) {
+  if (!browserAction || typeof browserAction !== 'object') {
+    return;
+  }
+
+  try {
+    await chrome.tabs.sendMessage(tabId, {
+      action: 'execute_browser_action',
+      source: 'background',
+      target: 'content',
+      browserAction,
+    });
+  } catch {
+    // Browser action execution is best-effort; voice response still completes.
+  }
 }
 
 /**
@@ -419,7 +479,7 @@ function sanitizeVoiceState(value) {
 }
 
 /**
- * @param {{ language?: unknown, intent?: unknown, workflow?: unknown, confidence?: unknown, responseText?: unknown, form?: unknown, data?: { intent?: unknown, nextQuestion?: unknown, workflow?: unknown, confidence?: unknown } | null }} response
+ * @param {{ language?: unknown, intent?: unknown, workflow?: unknown, confidence?: unknown, responseText?: unknown, form?: unknown, browserAction?: unknown, data?: { intent?: unknown, nextQuestion?: unknown, workflow?: unknown, confidence?: unknown, browserAction?: unknown } | null }} response
  * @returns {VoiceAssistantResult}
  */
 function buildAssistantResult(response) {
@@ -451,6 +511,7 @@ function buildAssistantResult(response) {
     confidence,
     responseText,
     form: response.form,
+    browserAction: response.browserAction || data.browserAction,
   };
 }
 

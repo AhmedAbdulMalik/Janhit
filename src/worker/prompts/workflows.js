@@ -79,7 +79,9 @@ Analyze the user's input and determine:
 2. Any entities mentioned (location, type, etc.)
 3. Confidence level in your classification
 4. The next spoken guidance sentence
+5. Whether the user is asking the browser to act on page content
 
+If the user asks to highlight, click, focus, or fill a page element, return a browserAction object that references the page context.
 Do not include hidden transcript text in the response. Keep responseText short, practical, and suitable for text-to-speech.
 
 Respond with JSON only:
@@ -90,7 +92,14 @@ Respond with JSON only:
   "clarification_needed": true/false,
   "nextQuestion": "question for missing detail or confirmation",
   "workflow": "workflow_id",
-  "responseText": "spoken assistant response"
+  "responseText": "spoken assistant response",
+  "browserAction": {
+    "type": "none | highlight | scroll_to | focus | click | fill_field",
+    "targetId": "optional element id from page context",
+    "targetSelector": "optional CSS selector",
+    "value": "optional field value for fill actions",
+    "label": "optional label for highlights or user feedback"
+  }
 }`;
 
 export const COLLECTION_PROMPT = `You are a helpful assistant collecting information for a civic complaint.

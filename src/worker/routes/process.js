@@ -48,7 +48,7 @@ export async function processTranscript(transcript, context, env) {
     'Supported workflows JSON:',
     JSON.stringify(WORKFLOWS),
     '',
-    'Return only JSON with keys: intent, confidence, entities, clarification_needed, nextQuestion, workflow, responseText.',
+    'Return only JSON with keys: intent, confidence, entities, clarification_needed, nextQuestion, workflow, responseText, browserAction.',
   ].join('\n');
 
   let modelPayload = fallback;
@@ -59,10 +59,10 @@ export async function processTranscript(transcript, context, env) {
     modelPayload = fallback;
   }
 
-  return normalizeProcessResult(modelPayload, fallback);
+  return normalizeProcessResult(modelPayload, fallback, transcript, context);
 }
 
-function normalizeProcessResult(payload, fallback) {
+function normalizeProcessResult(payload, fallback, transcript, context) {
   const intent = normalizeIntent(getString(payload.intent), fallback.intent);
   const workflow = getString(payload.workflow, intent);
   const workflowDefinition = WORKFLOWS[intent] || WORKFLOWS.municipal_complaint;
@@ -72,6 +72,7 @@ function normalizeProcessResult(payload, fallback) {
   const missingFields = getMissingFields(workflowDefinition, entities);
   const nextQuestion = getString(payload.nextQuestion, getString(payload.next_question, getDefaultQuestion(workflowDefinition, missingFields)));
   const responseText = getString(payload.responseText, buildResponseText(workflowDefinition, entities, missingFields, nextQuestion));
+  const browserAction = normalizeBrowserAction(payload.browserAction || payload.data?.browserAction) || normalizeBrowserAction(fallback.browserAction) || inferBrowserAction(transcript, intent, context);
 
   return {
     intent,
@@ -84,6 +85,56 @@ function normalizeProcessResult(payload, fallback) {
     workflow,
     responseText,
     missingFields,
+    browserAction,
+  };
+}
+
+function normalizeIntent(intent, fallbackIntent) {
+  if (intent && WORKFLOWS[intent]) {
+    return intent;
+  }
+
+  return WORKFLOWS[fallbackIntent] ? fallbackIntent : 'municipal_complaint';
+}
+
+function normalizeBrowserAction(rawAction) {
+  if (!rawAction || typeof rawAction !== 'object' || Array.isArray(rawAction)) {
+    return null;
+  }
+
+  const candidate = /** @type {{ type?: unknown, targetId?: unknown, target_id?: unknown, targetSelector?: unknown, selector?: unknown, value?: unknown, label?: unknown }} */ (rawAction);
+  const type = typeof candidate.type === 'string' ? candidate.type.trim() : 'none';
+  const allowedTypes = ['none', 'highlight', 'scroll_to', 'focus', 'click', 'fill_field'];
+
+  if (!allowedTypes.includes(type)) {
+    return null;
+  }
+
+  const targetId = typeof candidate.targetId === 'string' && candidate.targetId.trim()
+    ? candidate.targetId.trim()
+    : typeof candidate.target_id === 'string' && candidate.target_id.trim()
+      ? candidate.target_id.trim()
+      : null;
+
+  const targetSelector = typeof candidate.targetSelector === 'string' && candidate.targetSelector.trim()
+    ? candidate.targetSelector.trim()
+    : typeof candidate.selector === 'string' && candidate.selector.trim()
+      ? candidate.selector.trim()
+      : '';
+
+  const value = typeof candidate.value === 'string' ? candidate.value.slice(0, 1000) : '';
+  const label = typeof candidate.label === 'string' ? candidate.label.slice(0, 120) : '';
+
+  if (type === 'none') {
+    return null;
+  }
+
+  return {
+    type,
+    targetId,
+    targetSelector,
+    value,
+    label,
   };
 }
 
@@ -117,6 +168,7 @@ function classifyLocally(transcript, context) {
     workflow: intent,
     responseText: buildResponseText(workflowDefinition, entities, missingFields, nextQuestion),
     missingFields,
+    browserAction: inferBrowserAction(transcript, intent, context),
   };
 }
 
@@ -169,6 +221,132 @@ function extractEntities(transcript, intent, context) {
   return entities;
 }
 
+function inferBrowserAction(transcript, intent, context) {
+  if (!context || typeof context !== 'object' || !context.page || !Array.isArray(context.page.elements)) {
+    return null;
+  }
+
+  const normalized = transcript.toLowerCase();
+  const elements = /** @type {Array<Record<string, unknown>>} */ (context.page.elements);
+
+  const fieldTarget = findBestFieldElement(elements, normalized);
+  if (fieldTarget && includesAny(normalized, ['fill', 'enter', 'type', 'set', 'update'])) {
+    return {
+      type: 'fill_field',
+      targetId: fieldTarget.id || null,
+      targetSelector: fieldTarget.selector || '',
+      value: detectFillValue(normalized, fieldTarget) || '',
+      label: `Fill ${fieldTarget.label || fieldTarget.name || fieldTarget.text || 'field'}`,
+    };
+  }
+
+  if (includesAny(normalized, ['where is', 'show me', 'highlight', 'find the', 'locate the', 'point to'])) {
+    const target = findBestClickableElement(elements, normalized) || fieldTarget;
+    if (target) {
+      return {
+        type: 'highlight',
+        targetId: target.id || null,
+        targetSelector: target.selector || '',
+        label: `Here is ${target.label || target.text || target.name || 'the element'}`,
+      };
+    }
+  }
+
+  if (includesAny(normalized, ['click', 'press', 'tap', 'submit', 'continue', 'next'])) {
+    const target = findBestClickableElement(elements, normalized);
+    if (target) {
+      return {
+        type: 'click',
+        targetId: target.id || null,
+        targetSelector: target.selector || '',
+        label: `Click ${target.label || target.text || target.name || 'the item'}`,
+      };
+    }
+  }
+
+  if (includesAny(normalized, ['focus', 'go to', 'select', 'choose'])) {
+    const target = fieldTarget || findBestClickableElement(elements, normalized);
+    if (target) {
+      return {
+        type: 'focus',
+        targetId: target.id || null,
+        targetSelector: target.selector || '',
+        label: `Focus ${target.label || target.text || target.name || 'the element'}`,
+      };
+    }
+  }
+
+  return null;
+}
+
+function findBestFieldElement(elements, normalizedTranscript) {
+  const fieldNames = ['email', 'phone', 'contact', 'name', 'address', 'description', 'account', 'bank', 'complaint', 'message'];
+  for (const key of fieldNames) {
+    if (normalizedTranscript.includes(key)) {
+      const matching = elements.find((element) => {
+        const label = typeof element.label === 'string' ? element.label.toLowerCase() : '';
+        const name = typeof element.name === 'string' ? element.name.toLowerCase() : '';
+        const text = typeof element.text === 'string' ? element.text.toLowerCase() : '';
+        return label.includes(key) || name.includes(key) || text.includes(key);
+      });
+      if (matching) {
+        return matching;
+      }
+    }
+  }
+
+  return elements.find((element) => {
+    const text = (typeof element.text === 'string' ? element.text : '').toLowerCase();
+    return text.includes('search') || text.includes('submit') || text.includes('next');
+  }) || null;
+}
+
+function findBestClickableElement(elements, normalizedTranscript) {
+  const clickableElements = elements.filter((element) => element.clickable === true || element.role === 'button' || element.role === 'link');
+  if (!clickableElements.length) {
+    return null;
+  }
+
+  const keywords = ['submit', 'continue', 'next', 'save', 'search', 'apply', 'send', 'login', 'sign in', 'agree'];
+  for (const keyword of keywords) {
+    if (normalizedTranscript.includes(keyword)) {
+      const match = clickableElements.find((element) => {
+        const label = typeof element.label === 'string' ? element.label.toLowerCase() : '';
+        const text = typeof element.text === 'string' ? element.text.toLowerCase() : '';
+        const name = typeof element.name === 'string' ? element.name.toLowerCase() : '';
+        return label.includes(keyword) || text.includes(keyword) || name.includes(keyword);
+      });
+      if (match) {
+        return match;
+      }
+    }
+  }
+
+  return clickableElements[0] || null;
+}
+
+function detectFillValue(normalizedTranscript, element) {
+  if (normalizedTranscript.includes('email')) {
+    return extractValue(normalizedTranscript, /([a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,})/i);
+  }
+
+  if (normalizedTranscript.includes('phone') || normalizedTranscript.includes('contact')) {
+    return extractValue(normalizedTranscript, /(?:\+91[-\s]?)?[6-9]\d{9}\b/);
+  }
+
+  const quoted = normalizedTranscript.match(/"([^"]+)"/);
+  if (quoted && quoted[1]) {
+    return quoted[1].trim();
+  }
+
+  return '';
+}
+
+function extractValue(text, pattern) {
+  const match = text.match(pattern);
+  return match && match[0] ? match[0].trim() : '';
+}
+
 function getMissingFields(workflowDefinition, entities) {
   const requiredFields = workflowDefinition.steps.flatMap((step) => step.required_fields);
   return [...new Set(requiredFields)].filter((field) => !getString(entities[field]));
@@ -191,14 +369,6 @@ function buildResponseText(workflowDefinition, entities, missingFields, nextQues
   }
 
   return `I understood this as a ${workflowDefinition.name.toLowerCase()}. ${nextQuestion}`;
-}
-
-function normalizeIntent(intent, fallbackIntent) {
-  if (intent && WORKFLOWS[intent]) {
-    return intent;
-  }
-
-  return WORKFLOWS[fallbackIntent] ? fallbackIntent : 'municipal_complaint';
 }
 
 function sanitizeRecord(record) {

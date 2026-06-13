@@ -25,8 +25,18 @@
  *   confidence: number | null,
  *   entities: Record<string, unknown>,
  *   nextQuestion: string | null,
- *   workflow: string | null
+ *   workflow: string | null,
+ *   browserAction?: BrowserAction | null
  * }} ProcessResponseData
+ *
+ * @typedef {{
+ *   type: 'none' | 'highlight' | 'scroll_to' | 'focus' | 'click' | 'fill_field',
+ *   targetId?: string | null,
+ *   targetSelector?: string,
+ *   value?: string,
+ *   label?: string,
+ *   confidence?: number
+ * }} BrowserAction
  */
 
 /**
@@ -65,7 +75,8 @@
  *   audio_url: string,
  *   audio_mime_type?: string,
  *   data?: ProcessResponseData,
- *   form?: GeneratedForm
+ *   form?: GeneratedForm,
+ *   browserAction?: BrowserAction | null
  * }} VoiceAssistResponse
  */
 

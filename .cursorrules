@@ -1,0 +1,15 @@
+# 🌍 UNIVERSAL IDE AUTOMATION RULES
+# Path: ./.cursorrules
+
+## 1. WORKSPACE ANCHOR LINKAGES
+- You must review and strictly respect the parameters inside `copilot-instruction.md` for output styles.
+- You must review and enforce the role definitions, tasks, and constraints inside `agentcontext.md`.
+- You must review and track the structural technology choices and active sprint progress inside `projectcontext.md`.
+
+## 2. OUTPUT FORCE MULTIPLIERS
+- **Raw Execution First**: Drop all greeting templates, explanations of code behavior, or text preambles. Start the response stream directly with the target file code block.
+- **Credit-Preservation Rule**: The developer is running on a strict credit budget. Never drop comments like `// TODO` or `// ... rest of code`. You must always emit the complete file layout from start to finish.
+- **Strict File Tagging**: Every generated block must have its absolute workspace project path noted explicitly as a code comment on line number one.
+
+## 3. COMPILATION DIRECTION
+- Strictly conform to the build specifications, import targets, and strict compiler properties mapped inside your local `tsconfig.json` architecture.

@@ -1,0 +1,108 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  width: 280px;
+  min-height: 320px;
+  background: linear-gradient(180deg, #eef4f7 0%, #ffffff 100%);
+}
+
+.container {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  padding: 20px;
+}
+
+.header {
+  text-align: center;
+}
+
+.header h1 {
+  font-size: 24px;
+  font-weight: 700;
+  color: #0d4c5b;
+  margin: 0;
+}
+
+.voice-control {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.voice-btn {
+  width: 100px;
+  height: 100px;
+  background: linear-gradient(135deg, #0d4c5b 0%, #179971 100%);
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  transition: all 0.2s ease;
+  box-shadow: 0 8px 20px rgba(13, 76, 91, 0.25);
+}
+
+.voice-btn:hover {
+  transform: scale(1.06);
+  box-shadow: 0 10px 24px rgba(13, 76, 91, 0.35);
+}
+
+.voice-btn:active {
+  transform: scale(0.95);
+}
+
+.voice-btn.listening {
+  background: linear-gradient(135deg, #ff7b00 0%, #d94841 100%);
+  animation: pulse 1s infinite;
+}
+
+@keyframes pulse {
+  0% {
+    box-shadow: 0 8px 20px rgba(217, 72, 65, 0.3);
+  }
+  50% {
+    box-shadow: 0 10px 28px rgba(217, 72, 65, 0.45);
+  }
+  100% {
+    box-shadow: 0 8px 20px rgba(217, 72, 65, 0.3);
+  }
+}
+
+.voice-btn svg {
+  width: 48px;
+  height: 48px;
+}
+
+.toggle-label {
+  font-size: 16px;
+  font-weight: 700;
+  color: #0d4c5b;
+}
+
+.status-text {
+  font-size: 12px;
+  color: #666;
+  text-align: center;
+  min-height: 32px;
+  line-height: 1.4;
+  margin: 0;
+}
+
+.shortcut-text {
+  font-size: 12px;
+  color: #39586a;
+  margin: 0;
+}

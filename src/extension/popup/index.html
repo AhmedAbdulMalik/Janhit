@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Janhit</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>Janhit</h1>
+    </div>
+
+    <div class="voice-control">
+      <button id="voice-btn" class="voice-btn" title="Click to start voice input or use Ctrl+Alt (Windows) / Control+Option (Mac)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 1a3 3 0 0 0-3 3v12a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+          <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+          <line x1="12" y1="19" x2="12" y2="23"></line>
+          <line x1="8" y1="23" x2="16" y2="23"></line>
+        </svg>
+      </button>
+      <p class="toggle-label" id="toggle-label">Voice OFF</p>
+      <p class="status-text" id="status">Click the button or hold the shortcut to toggle voice control.</p>
+      <p class="shortcut-text">Windows: <strong>Ctrl + Alt</strong></p>
+      <p class="shortcut-text">Mac: <strong>Control + Option</strong></p>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

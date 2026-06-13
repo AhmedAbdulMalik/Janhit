@@ -101,16 +101,48 @@ function extractAudioFromJson(payload) {
     };
   }
 
-  const audioUrl = getString(payload.audio_url || payload.audioUrl || payload.url);
+  const candidate = payload.data && typeof payload.data === 'object' ? payload.data : payload;
+  const audioUrl = getString(candidate.audio_url || candidate.audioUrl || candidate.url || payload.url);
+
   if (audioUrl) {
     return {
       audioUrl,
-      mimeType: getString(payload.audio_mime_type || payload.mime_type, 'audio/wav'),
+      mimeType: getString(candidate.audio_mime_type || candidate.mime_type || payload.audio_mime_type || payload.mime_type, 'audio/wav'),
     };
   }
 
-  const base64Audio = getString(payload.audio || payload.audio_content || payload.audioContent);
-  const mimeType = getString(payload.audio_mime_type || payload.mime_type, 'audio/wav');
+  const audioList = Array.isArray(payload.audios) ? payload.audios : Array.isArray(candidate.audios) ? candidate.audios : [];
+  if (audioList.length > 0) {
+    const firstAudio = audioList[0];
+
+    if (typeof firstAudio === 'string' && firstAudio.trim()) {
+      return {
+        audioUrl: `data:audio/wav;base64,${firstAudio.trim()}`,
+        mimeType: 'audio/wav',
+      };
+    }
+
+    if (firstAudio && typeof firstAudio === 'object') {
+      const objectAudioUrl = getString(firstAudio.audio_url || firstAudio.audioUrl || firstAudio.url);
+      if (objectAudioUrl) {
+        return {
+          audioUrl: objectAudioUrl,
+          mimeType: getString(firstAudio.audio_mime_type || firstAudio.mime_type || candidate.audio_mime_type || candidate.mime_type || payload.audio_mime_type || payload.mime_type, 'audio/wav'),
+        };
+      }
+
+      const objectBase64 = getString(firstAudio.audio || firstAudio.audio_content || firstAudio.audioContent || firstAudio.content);
+      if (objectBase64) {
+        return {
+          audioUrl: `data:audio/wav;base64,${objectBase64}`,
+          mimeType: getString(firstAudio.audio_mime_type || firstAudio.mime_type || candidate.audio_mime_type || candidate.mime_type || payload.audio_mime_type || payload.mime_type, 'audio/wav'),
+        };
+      }
+    }
+  }
+
+  const base64Audio = getString(candidate.audio || candidate.audio_content || candidate.audioContent || candidate.content || payload.audio || payload.audio_content || payload.audioContent || payload.content);
+  const mimeType = getString(candidate.audio_mime_type || candidate.mime_type || payload.audio_mime_type || payload.mime_type, 'audio/wav');
 
   return {
     audioUrl: base64Audio ? `data:${mimeType};base64,${base64Audio}` : '',
@@ -118,9 +150,48 @@ function extractAudioFromJson(payload) {
   };
 }
 
+const LANGUAGE_CODE_ALIASES = {
+  en: 'en-IN',
+  hi: 'hi-IN',
+  bn: 'bn-IN',
+  brx: 'brx-IN',
+  doi: 'doi-IN',
+  gu: 'gu-IN',
+  kn: 'kn-IN',
+  kok: 'kok-IN',
+  ks: 'ks-IN',
+  mai: 'mai-IN',
+  ml: 'ml-IN',
+  mni: 'mni-IN',
+  mr: 'mr-IN',
+  ne: 'ne-IN',
+  od: 'od-IN',
+  pa: 'pa-IN',
+  sa: 'sa-IN',
+  sat: 'sat-IN',
+  sd: 'sd-IN',
+  ta: 'ta-IN',
+  te: 'te-IN',
+  ur: 'ur-IN',
+};
+
 function normalizeLanguage(language) {
   const normalized = language.replace('_', '-');
-  return /^[a-z]{2,3}(-[A-Z]{2})?$/.test(normalized) ? normalized : DEFAULT_LANGUAGE;
+
+  if (typeof normalized !== 'string' || !normalized.trim()) {
+    return DEFAULT_LANGUAGE;
+  }
+
+  const raw = normalized.trim();
+  if (LANGUAGE_CODE_ALIASES[raw]) {
+    return LANGUAGE_CODE_ALIASES[raw];
+  }
+
+  if (/^[a-z]{2,3}(-[A-Z]{2})?$/.test(raw)) {
+    return raw;
+  }
+
+  return DEFAULT_LANGUAGE;
 }
 
 function arrayBufferToBase64(buffer) {

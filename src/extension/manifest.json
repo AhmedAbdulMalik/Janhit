@@ -5,7 +5,6 @@
   "description": "Voice-first civic assistant. Hold Ctrl + Alt to speak, or press the popup mic.",
   "permissions": [
     "offscreen",
-    "microphone",
     "storage",
     "activeTab",
     "scripting"

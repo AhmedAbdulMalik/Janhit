@@ -52,7 +52,7 @@ The result is a significantly simpler and more accessible way to interact with p
 # Vision
 
 To become the AI layer between citizens and public services, making government procedures as simple as having a conversation.
-
+listen here, so when the user opens any website Janhit needs to know what the user is browsering so that it can guide through, it even futher, when user is browersing forms it can guide with which placeholder to be filled or even Janhit can auto fill it, that is my intention
 ---
 
 # Mission

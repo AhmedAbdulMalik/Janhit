@@ -143,6 +143,12 @@ body {
   gap: 10px;
 }
 
+.assistant-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
 .assistant-heading {
   font-size: 12px;
   font-weight: 700;
@@ -155,4 +161,60 @@ body {
   font-size: 13px;
   line-height: 1.55;
   color: #314856;
+}
+
+.target-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.target-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+  color: #0f172a;
+  background: #e2e8f0;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+.target-chip.search {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.target-chip.link {
+  background: #ede9fe;
+  color: #6d28d9;
+}
+
+.target-chip.button {
+  background: #ffedd5;
+  color: #c2410c;
+}
+
+.target-chip.input {
+  background: #d1fae5;
+  color: #047857;
+}
+
+.target-chip.checkbox {
+  background: #fce7f3;
+  color: #be185d;
+}
+
+.target-chip.radio {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.target-chip.dropdown,
+.target-chip.tab {
+  background: #e0f2fe;
+  color: #0369a1;
 }

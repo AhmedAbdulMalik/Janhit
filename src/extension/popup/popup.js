@@ -33,6 +33,7 @@
  *   language: string,
   *   intent: string | null,
   *   responseText: string,
+ *   pageSummary?: string,
   *   workflow: string | null,
   *   confidence: number | null
  * }} VoiceAssistantResult
@@ -51,13 +52,17 @@
  *   voiceButton: HTMLButtonElement | null,
  *   toggleLabel: HTMLElement | null,
  *   statusText: HTMLElement | null,
- *   responseText: HTMLElement | null
+ *   pageText: HTMLElement | null,
+ *   actionText: HTMLElement | null,
+ *   targetsText: HTMLElement | null
  * }} */
 const elements = {
   voiceButton: null,
   toggleLabel: null,
   statusText: null,
-  responseText: null,
+  pageText: null,
+  actionText: null,
+  targetsText: null,
 };
 
 /** @type {VoiceStatusSnapshot} */
@@ -79,7 +84,9 @@ function cacheDomReferences() {
   elements.voiceButton = document.getElementById('voice-btn');
   elements.toggleLabel = document.getElementById('toggle-label');
   elements.statusText = document.getElementById('status');
-  elements.responseText = document.getElementById('response-text');
+  elements.pageText = document.getElementById('page-text');
+  elements.actionText = document.getElementById('action-text');
+  elements.targetsText = document.getElementById('targets-text');
 }
 
 function bindPushToTalkControls() {
@@ -242,24 +249,7 @@ function renderAssistantResult(rawResult) {
     lastAssistantResult: result,
   };
 
-  if (elements.responseText) {
-    const details = [];
-
-    if (result.intent) {
-      details.push(`Intent: ${result.intent.replace(/_/g, ' ')}`);
-    }
-
-    if (result.workflow) {
-      details.push(`Workflow: ${result.workflow.replace(/_/g, ' ')}`);
-    }
-
-    if (typeof result.confidence === 'number') {
-      details.push(`Confidence: ${(result.confidence * 100).toFixed(0)}%`);
-    }
-
-    const detailSuffix = details.length > 0 ? ` (${details.join(' | ')})` : '';
-    elements.responseText.textContent = `${result.responseText}${detailSuffix}`;
-  }
+  renderAssistantLines(rawResult, result);
 
   // If backend returned a domAction requiring confirmation (click/fill), surface it.
   try {
@@ -342,6 +332,162 @@ function renderVoiceUi() {
 
   elements.toggleLabel.textContent = 'Ready';
   elements.statusText.textContent = 'Press and hold to talk.';
+}
+
+/**
+ * @param {unknown} rawResult
+ * @returns {string}
+ */
+function renderCandidateSuffix(rawResult) {
+  if (!rawResult || typeof rawResult !== 'object') {
+    return '';
+  }
+
+  const candidate = /** @type {{ domAction?: { target_candidates?: unknown } }} */ (rawResult);
+  const domAction = candidate.domAction;
+  const targetCandidates = domAction && Array.isArray(domAction.target_candidates) ? domAction.target_candidates : [];
+
+  if (targetCandidates.length === 0) {
+    return '';
+  }
+
+  const labels = targetCandidates
+    .slice(0, 3)
+    .map((item) => {
+      if (!item || typeof item !== 'object') return '';
+      const target = /** @type {{ label?: unknown, kind?: unknown, role?: unknown, type?: unknown, selector?: unknown }} */ (item);
+      const label = typeof target.label === 'string' ? target.label : '';
+      const kind = typeof target.kind === 'string' ? target.kind : '';
+      const role = typeof target.role === 'string' ? target.role : '';
+      const type = typeof target.type === 'string' ? target.type : '';
+      return renderTargetChip(label, kind, role, type);
+    })
+    .filter(Boolean);
+
+  return labels.length > 0 ? labels.join('') : '';
+}
+
+/**
+ * @param {unknown} rawResult
+ * @param {VoiceAssistantResult} result
+ */
+function renderAssistantLines(rawResult, result) {
+  const pageSummary = extractPageSummary(rawResult);
+  const actionLine = buildActionLine(result);
+  const targetsLine = renderCandidateSuffix(rawResult);
+
+  if (elements.pageText) {
+    elements.pageText.textContent = `Page: ${pageSummary || 'Unknown'}`;
+  }
+
+  if (elements.actionText) {
+    elements.actionText.textContent = `Action: ${actionLine}`;
+  }
+
+  if (elements.targetsText) {
+    if (targetsLine) {
+      elements.targetsText.innerHTML = `<span>Targets:</span> <span class="target-list">${targetsLine}</span>`;
+    } else {
+      elements.targetsText.textContent = 'Targets: None yet.';
+    }
+  }
+}
+
+/**
+ * @param {unknown} rawResult
+ * @returns {string}
+ */
+function extractPageSummary(rawResult) {
+  if (!rawResult || typeof rawResult !== 'object') {
+    return '';
+  }
+
+  const candidate = /** @type {{ pageSummary?: unknown, domAction?: { pageSummary?: unknown }, data?: { pageSummary?: unknown } }} */ (rawResult);
+  const direct = typeof candidate.pageSummary === 'string' ? candidate.pageSummary : '';
+  const domSummary = candidate.domAction && typeof candidate.domAction.pageSummary === 'string' ? candidate.domAction.pageSummary : '';
+  const dataSummary = candidate.data && typeof candidate.data.pageSummary === 'string' ? candidate.data.pageSummary : '';
+  return direct || domSummary || dataSummary || '';
+}
+
+/**
+ * @param {VoiceAssistantResult} result
+ * @returns {string}
+ */
+function buildActionLine(result) {
+  const pieces = [];
+  if (result.intent) {
+    pieces.push(result.intent.replace(/_/g, ' '));
+  }
+  if (result.workflow && result.workflow !== result.intent) {
+    pieces.push(result.workflow.replace(/_/g, ' '));
+  }
+  if (typeof result.confidence === 'number') {
+    pieces.push(`${(result.confidence * 100).toFixed(0)}%`);
+  }
+  return pieces.length > 0 ? pieces.join(' • ') : 'Waiting for input';
+}
+
+/**
+ * @param {string} label
+ * @param {string} kind
+ * @param {string} role
+ * @param {string} type
+ * @returns {string}
+ */
+function renderTargetChip(label, kind, role, type) {
+  const normalized = `${kind} ${role} ${type} ${label}`.toLowerCase();
+  const chipKind = kind || getChipKindFromText(normalized);
+  const friendlyLabel = getFriendlyLabel(label, chipKind, normalized);
+
+  return `<span class="target-chip ${chipKind}">${escapeHtml(friendlyLabel)}</span>`;
+}
+
+/**
+ * @param {string} normalized
+ * @returns {string}
+ */
+function getChipKindFromText(normalized) {
+  if (normalized.includes('search')) return 'search';
+  if (normalized.includes('link') || normalized.includes('anchor')) return 'link';
+  if (normalized.includes('button') || normalized.includes('submit') || normalized.includes('click')) return 'button';
+  if (normalized.includes('input') || normalized.includes('field') || normalized.includes('textarea') || normalized.includes('email') || normalized.includes('url')) return 'input';
+  if (normalized.includes('checkbox')) return 'checkbox';
+  if (normalized.includes('radio')) return 'radio';
+  if (normalized.includes('select') || normalized.includes('combobox')) return 'dropdown';
+  if (normalized.includes('tab')) return 'tab';
+  return 'target';
+}
+
+/**
+ * @param {string} label
+ * @param {string} kind
+ * @param {string} normalized
+ * @returns {string}
+ */
+function getFriendlyLabel(label, kind, normalized) {
+  const safeLabel = label || 'Target';
+  if (kind === 'search' || normalized.includes('search')) return `Search: ${safeLabel}`;
+  if (kind === 'link' || normalized.includes('link') || normalized.includes('anchor')) return `Link: ${safeLabel}`;
+  if (kind === 'button' || normalized.includes('button') || normalized.includes('submit') || normalized.includes('click')) return `Button: ${safeLabel}`;
+  if (kind === 'input' || normalized.includes('input') || normalized.includes('field') || normalized.includes('textarea') || normalized.includes('email') || normalized.includes('url')) return `Input: ${safeLabel}`;
+  if (kind === 'checkbox' || normalized.includes('checkbox')) return `Checkbox: ${safeLabel}`;
+  if (kind === 'radio' || normalized.includes('radio')) return `Radio: ${safeLabel}`;
+  if (kind === 'dropdown' || normalized.includes('select') || normalized.includes('combobox')) return `Dropdown: ${safeLabel}`;
+  if (kind === 'tab' || normalized.includes('tab')) return `Tab: ${safeLabel}`;
+  return safeLabel;
+}
+
+/**
+ * @param {string} value
+ * @returns {string}
+ */
+function escapeHtml(value) {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
 }
 
 /**

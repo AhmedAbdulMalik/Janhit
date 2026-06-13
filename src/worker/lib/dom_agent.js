@@ -18,9 +18,23 @@ function findBestElement(elements, needle) {
     if (!hay) continue;
 
     let score = 0;
+    if (Number(el.importance) > 0) score += Math.min(10, Number(el.importance) / 10);
     if (hay === key) score += 10;
     if (hay.includes(key)) score += 6;
     if (normalizedNeedle && hay.includes(normalizedNeedle)) score += 8;
+
+    if (/(search|url|find|locate)/i.test(key) && /(search|find|url|location|address|bar|box|input|field)/i.test(hay)) {
+      score += 12;
+    }
+    if (/(link|open|visit|go to)/i.test(key) && /(link|open|tab|page|anchor|visit|go to)/i.test(hay)) {
+      score += 10;
+    }
+    if (/(button|click|press|submit|next|continue)/i.test(key) && /(button|submit|next|continue|go|send|save|open)/i.test(hay)) {
+      score += 10;
+    }
+    if (/(fill|type|enter|write|input|search)/i.test(key) && /(input|field|box|textarea|search|email|url|name|text)/i.test(hay)) {
+      score += 11;
+    }
 
     const tokens = key.split(/\s+/).filter(Boolean);
     for (const token of tokens) {
@@ -53,10 +67,51 @@ function findFallbackElement(elements, transcript) {
     if (match) return match;
   }
 
-  return elements.find((element) => {
+  const scored = [...elements].sort((left, right) => {
+    const rightScore = Number(right.importance) || 0;
+    const leftScore = Number(left.importance) || 0;
+    return rightScore - leftScore;
+  });
+
+  const preferred = scored.find((element) => {
     const hay = sanitizeText(element.label || element.name || element.text || element.placeholder || '').toLowerCase();
     return hay && (element.clickable === true || element.role === 'button' || element.role === 'link' || element.type === 'text' || element.type === 'search' || element.type === 'email');
-  }) || null;
+  });
+
+  return preferred || scored[0] || null;
+}
+
+function getTargetCandidates(elements) {
+  return [...elements]
+    .sort((left, right) => (Number(right.importance) || 0) - (Number(left.importance) || 0))
+    .slice(0, 5)
+    .map((element) => ({
+      label: sanitizeText(element.label || element.placeholder || element.text || element.name || ''),
+      kind: inferTargetKind(element),
+      selector: typeof element.selector === 'string' ? element.selector : '',
+      role: typeof element.role === 'string' ? element.role : '',
+      type: typeof element.type === 'string' ? element.type : '',
+      importance: Number(element.importance) || 0,
+    }))
+    .filter((element) => element.label || element.selector);
+}
+
+function inferTargetKind(element) {
+  const role = sanitizeText(element?.role || '').toLowerCase();
+  const type = sanitizeText(element?.type || '').toLowerCase();
+  const label = sanitizeText(element?.label || element?.placeholder || element?.text || element?.name || '').toLowerCase();
+  const hay = `${role} ${type} ${label}`;
+
+  if (hay.includes('search')) return 'search';
+  if (hay.includes('link') || hay.includes('anchor')) return 'link';
+  if (hay.includes('button') || hay.includes('submit') || hay.includes('click')) return 'button';
+  if (hay.includes('input') || hay.includes('field') || hay.includes('textarea') || hay.includes('email') || hay.includes('url') || hay.includes('text')) return 'input';
+  if (hay.includes('checkbox')) return 'checkbox';
+  if (hay.includes('radio')) return 'radio';
+  if (hay.includes('select') || hay.includes('combobox') || hay.includes('dropdown')) return 'dropdown';
+  if (hay.includes('tab')) return 'tab';
+
+  return 'target';
 }
 
 function extractQuoted(text) {
@@ -119,13 +174,30 @@ export function generateDomAction(params) {
     return null;
   }
 
+  function selectorCandidatesFor(el) {
+    const candidates = [];
+    if (!el) return candidates;
+    if (Array.isArray(el.selectorCandidates)) {
+      candidates.push(...el.selectorCandidates.filter((value) => typeof value === 'string' && value.trim()).map((value) => value.trim()));
+    }
+    const selector = bestSelectorFor(el);
+    if (selector) candidates.unshift(selector);
+    return [...new Set(candidates)].slice(0, 6);
+  }
+
   if (action === 'answer_question') {
     const title = sanitizeText(params.page_title || page.title || 'this page');
     const snippet = sanitizeText(page.visibleText || '').split('\n').map((line) => line.trim()).filter(Boolean).slice(0, 6).join(' ');
+    const ranked = [...interactive].sort((left, right) => (Number(right.importance) || 0) - (Number(left.importance) || 0));
+    const topLabels = ranked.slice(0, 4).map((element) => sanitizeText(element.label || element.placeholder || element.text || element.name || '')).filter(Boolean);
     result.action = 'answer_question';
     result.target_selector = null;
+    result.target_selector_candidates = [];
     result.scroll_first = false;
-    result.spoken_text = snippet || (title ? `This page appears to be titled ${title}.` : 'I do not have enough visible information on this page.');
+    result.spoken_text = title
+      ? `${title}${topLabels.length ? `. Top controls: ${topLabels.join(', ')}` : ''}${snippet ? `. ${snippet}` : ''}`
+      : (snippet || 'I do not have enough visible information on this page.');
+    result.target_candidates = getTargetCandidates(ranked);
     result.follow_up = 'Want me to find or highlight something?';
     return result;
   }
@@ -136,22 +208,27 @@ export function generateDomAction(params) {
     return (candidates && candidates[1]) ? candidates[1].trim() : elementHint;
   })();
 
-  const resolved = findBestElement(interactive, targetHint || transcript) || findFallbackElement(interactive, transcript);
+  const rankedCandidates = [...interactive].sort((left, right) => (Number(right.importance) || 0) - (Number(left.importance) || 0));
+  const resolved = findBestElement(rankedCandidates, targetHint || transcript) || findFallbackElement(rankedCandidates, transcript);
   if (!resolved) {
     result.action = 'none';
     result.spoken_text = `I couldn’t find "${targetHint || transcript}" on this page.`;
+    result.target_candidates = getTargetCandidates(rankedCandidates);
     result.follow_up = 'Try the label or visible text.';
     return result;
   }
 
   const selector = bestSelectorFor(resolved) || resolved.selector || null;
+  const selectorCandidates = selectorCandidatesFor(resolved);
   const offscreen = resolved.rect && (resolved.rect.y > (params.viewport?.height || 800) || resolved.rect.x > (params.viewport?.width || 1200));
 
   if (action === 'highlight') {
     result.action = 'highlight';
     result.spoken_text = `Found ${resolved.label || resolved.text || 'the element'}.`;
     result.target_selector = selector;
+    result.target_selector_candidates = selectorCandidates;
     result.scroll_first = !!offscreen;
+    result.target_candidates = getTargetCandidates(rankedCandidates);
     result.follow_up = 'Focus or click it?';
     return result;
   }
@@ -160,7 +237,9 @@ export function generateDomAction(params) {
     result.action = 'scroll';
     result.spoken_text = `Scrolling to ${resolved.label || resolved.text || 'the element'}.`;
     result.target_selector = selector;
+    result.target_selector_candidates = selectorCandidates;
     result.scroll_first = true;
+    result.target_candidates = getTargetCandidates(rankedCandidates);
     return result;
   }
 
@@ -168,7 +247,9 @@ export function generateDomAction(params) {
     result.action = 'focus';
     result.spoken_text = `Focusing ${resolved.label || resolved.placeholder || 'the input'}.`;
     result.target_selector = selector;
+    result.target_selector_candidates = selectorCandidates;
     result.scroll_first = !!offscreen;
+    result.target_candidates = getTargetCandidates(rankedCandidates);
     return result;
   }
 
@@ -184,7 +265,9 @@ export function generateDomAction(params) {
     result.action = 'click';
     result.spoken_text = `Clicking ${resolved.label || resolved.text || 'the element'}.`;
     result.target_selector = selector;
+    result.target_selector_candidates = selectorCandidates;
     result.scroll_first = !!offscreen;
+    result.target_candidates = getTargetCandidates(rankedCandidates);
     return result;
   }
 
@@ -231,6 +314,8 @@ export function generateDomAction(params) {
     result.action = 'fill_form';
     result.spoken_text = `Ready to fill ${fills.length} field(s).`;
     result.fills = fills;
+    result.target_selector_candidates = selectorCandidates;
+    result.target_candidates = getTargetCandidates(rankedCandidates);
     result.follow_up = 'Fill them now?';
     return result;
   }
@@ -238,7 +323,9 @@ export function generateDomAction(params) {
   result.action = 'highlight';
   result.spoken_text = `Found ${resolved.label || resolved.text || 'the element'}.`;
   result.target_selector = selector;
+  result.target_selector_candidates = selectorCandidates;
   result.scroll_first = !!offscreen;
+  result.target_candidates = getTargetCandidates(rankedCandidates);
   result.follow_up = 'Focus or click it?';
   return result;
 }

@@ -36,6 +36,19 @@ const OVERLAY_ID = 'clicky-buddy-overlay';
 const CURSOR_ID = 'clicky-buddy-cursor';
 const BUBBLE_ID = 'clicky-buddy-bubble';
 
+if (!document.getElementById('janhit-halo-style')) {
+  const style = document.createElement('style');
+  style.id = 'janhit-halo-style';
+  style.textContent = `
+    @keyframes janhitHaloPulse {
+      0% { transform: scale(1); }
+      50% { transform: scale(1.01); }
+      100% { transform: scale(1); }
+    }
+  `;
+  document.documentElement.appendChild(style);
+}
+
 /** @type {Map<string, Element>} */
 const elementRegistry = new Map();
 
@@ -162,6 +175,7 @@ function getPageContext() {
   const candidates = collectCandidateElements();
   const elements = candidates.slice(0, MAX_CONTEXT_ELEMENTS).map((element, index) => serializeElement(element, index));
   const activeElementId = document.activeElement instanceof Element ? getRegisteredElementId(document.activeElement) : null;
+  const summary = buildPageSummary(elements);
 
   return {
     url: window.location.href,
@@ -177,6 +191,7 @@ function getPageContext() {
     activeElementRect: getActiveElementRect(),
     elements,
     visibleText: getVisiblePageText(),
+    summary,
   };
 }
 
@@ -219,6 +234,8 @@ function serializeElement(element, index) {
   const label = getElementLabel(element);
   const role = getElementRole(element);
   const selector = getElementSelector(element);
+  const selectorCandidates = getElementSelectorCandidates(element);
+  const score = getElementImportance(element, field, role, label, text, rect);
 
   return {
     id,
@@ -235,8 +252,10 @@ function serializeElement(element, index) {
     readonly: field.readonly,
     clickable: isClickableElement(element),
     editable: isEditableElement(element),
+    importance: score,
     options: getSelectOptions(element),
     selector,
+    selectorCandidates,
     rect: {
       x: Math.round(rect.left),
       y: Math.round(rect.top),
@@ -244,6 +263,79 @@ function serializeElement(element, index) {
       height: Math.round(rect.height),
     },
   };
+}
+
+/**
+ * @param {Element} element
+ * @param {{ type: string, name: string, placeholder: string, value: string, required: boolean, disabled: boolean, readonly: boolean }} field
+ * @param {string} role
+ * @param {string} label
+ * @param {string} text
+ * @param {DOMRect} rect
+ * @returns {number}
+ */
+function getElementImportance(element, field, role, label, text, rect) {
+  let score = 0;
+
+  if (isClickableElement(element)) score += 30;
+  if (isEditableElement(element)) score += 25;
+  if (element instanceof HTMLInputElement && ['search', 'text', 'email', 'url', 'tel'].includes(element.type)) score += 20;
+  if (element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement) score += 18;
+  if (role === 'button' || role === 'link' || role === 'combobox') score += 18;
+  if (field.placeholder) score += 5;
+  if (label) score += 8;
+  if (text) score += 4;
+  if (field.required) score += 4;
+  if (!field.disabled && !field.readonly) score += 4;
+  if (rect.top < window.innerHeight * 0.75) score += 4;
+  if (rect.width > 0 && rect.height > 0) score += 4;
+  return score;
+}
+
+/**
+ * @param {Array<Record<string, unknown>>} elements
+ * @returns {string}
+ */
+function buildPageSummary(elements) {
+  const ranked = [...elements].sort((left, right) => (Number(right.importance) || 0) - (Number(left.importance) || 0));
+  const topLabels = ranked
+    .slice(0, 5)
+    .map((element) => sanitizeText(element.label || element.placeholder || element.text || element.name || ''))
+    .filter(Boolean);
+
+  const title = sanitizeText(document.title || '');
+  const visibleText = getVisiblePageText();
+  const textSnippet = sanitizeText(visibleText).split(/\s+/).slice(0, 18).join(' ');
+  const parts = [];
+
+  if (title) {
+    parts.push(`You’re on ${title}`);
+  }
+
+  if (topLabels.length > 0) {
+    parts.push(`top controls: ${topLabels.join(', ')}`);
+  }
+
+  if (textSnippet) {
+    parts.push(`page text: ${textSnippet}`);
+  }
+
+  return parts.join('. ');
+}
+
+/**
+ * @returns {string}
+ */
+function getPageSummary() {
+  const context = getPageContext();
+  const elements = Array.isArray(context.elements) ? [...context.elements] : [];
+  elements.sort((left, right) => (Number(right.importance) || 0) - (Number(left.importance) || 0));
+  const top = elements.slice(0, 5).map((element) => element.label || element.placeholder || element.text || element.name || '').filter(Boolean);
+  const pageParts = [];
+  if (context.title) pageParts.push(`On ${context.title}`);
+  if (top.length) pageParts.push(`top controls: ${top.join(', ')}`);
+  if (context.visibleText) pageParts.push(`text: ${context.visibleText.split(/\s+/).slice(0, 18).join(' ')}`);
+  return pageParts.join('. ');
 }
 
 /**
@@ -479,9 +571,14 @@ function sanitizeBrowserAction(rawAction) {
     return null;
   }
 
-  const candidate = /** @type {{ type?: unknown, targetId?: unknown, target_id?: unknown, targetSelector?: unknown, selector?: unknown, value?: unknown, label?: unknown }} */ (rawAction);
+  const candidate = /** @type {{ type?: unknown, targetId?: unknown, target_id?: unknown, targetSelector?: unknown, targetSelectorCandidates?: unknown, selector?: unknown, selectorCandidates?: unknown, value?: unknown, label?: unknown }} */ (rawAction);
   const type = typeof candidate.type === 'string' && candidate.type.trim() ? candidate.type.trim().toLowerCase() : 'none';
   const allowedTypes = ['none', 'highlight', 'scroll_to', 'focus', 'click', 'fill_field'];
+  const selectorCandidates = Array.isArray(candidate.targetSelectorCandidates)
+    ? candidate.targetSelectorCandidates.filter((value) => typeof value === 'string' && value.trim()).map((value) => value.trim()).slice(0, 8)
+    : Array.isArray(candidate.selectorCandidates)
+      ? candidate.selectorCandidates.filter((value) => typeof value === 'string' && value.trim()).map((value) => value.trim()).slice(0, 8)
+      : [];
 
   return {
     type: allowedTypes.includes(type) ? type : 'none',
@@ -495,6 +592,7 @@ function sanitizeBrowserAction(rawAction) {
       : typeof candidate.selector === 'string' && candidate.selector.trim()
         ? candidate.selector.trim()
         : '',
+    selectorCandidates,
     value: typeof candidate.value === 'string' ? candidate.value.slice(0, 2000) : '',
     label: typeof candidate.label === 'string' ? candidate.label.slice(0, 120) : '',
   };
@@ -524,11 +622,17 @@ function resolveTargetElement(action) {
   }
 
   if (action.targetSelector) {
-    try {
-      const element = document.querySelector(action.targetSelector);
-      return element && isVisibleElement(element) ? element : null;
-    } catch {
-      return null;
+    const selectorList = [action.targetSelector, ...(Array.isArray(action.selectorCandidates) ? action.selectorCandidates : [])];
+
+    for (const selector of selectorList) {
+      try {
+        const element = document.querySelector(selector);
+        if (element && isVisibleElement(element)) {
+          return element;
+        }
+      } catch {
+        // Keep trying fallback selectors.
+      }
     }
   }
 
@@ -808,6 +912,50 @@ function getElementSelector(element) {
 
 /**
  * @param {Element} element
+ * @returns {string[]}
+ */
+function getElementSelectorCandidates(element) {
+  const candidates = [];
+
+  if (!(element instanceof Element)) {
+    return candidates;
+  }
+
+  const selector = getElementSelector(element);
+  if (selector) {
+    candidates.push(selector);
+  }
+
+  const id = getElementAttribute(element, 'id');
+  if (id) {
+    candidates.push(`#${cssEscape(id)}`);
+  }
+
+  const name = getElementAttribute(element, 'name');
+  if (name) {
+    candidates.push(`${element.tagName.toLowerCase()}[name="${cssEscape(name)}"]`);
+  }
+
+  const ariaLabel = getElementAttribute(element, 'aria-label');
+  if (ariaLabel) {
+    candidates.push(`${element.tagName.toLowerCase()}[aria-label="${cssEscape(ariaLabel)}"]`);
+  }
+
+  const role = getElementAttribute(element, 'role');
+  if (role) {
+    candidates.push(`${element.tagName.toLowerCase()}[role="${cssEscape(role)}"]`);
+  }
+
+  const dataElementId = getElementAttribute(element, 'data-janhit-element-id');
+  if (dataElementId) {
+    candidates.push(`[data-janhit-element-id="${cssEscape(dataElementId)}"]`);
+  }
+
+  return [...new Set(candidates.filter(Boolean))].slice(0, 6);
+}
+
+/**
+ * @param {Element} element
  * @returns {boolean}
  */
 function isVisibleElement(element) {
@@ -1005,6 +1153,8 @@ function drawHighlight(element, label) {
   removeHighlight();
 
   const rect = element.getBoundingClientRect();
+  const highlightKind = classifyHighlightLabel(label);
+  const palette = getHighlightPalette(highlightKind);
   const overlay = document.createElement('div');
   overlay.id = HIGHLIGHT_ID;
   overlay.style.cssText = [
@@ -1014,12 +1164,13 @@ function drawHighlight(element, label) {
     `width:${Math.max(8, rect.width + 12)}px`,
     `height:${Math.max(8, rect.height + 12)}px`,
     'z-index:2147483647',
-    'border:3px solid #0ea5e9',
-    'box-shadow:0 0 0 6px rgba(14,165,233,.22),0 12px 32px rgba(15,23,42,.18)',
-    'border-radius:8px',
+    `border:3px solid ${palette.border}`,
+    `box-shadow:0 0 0 6px ${palette.ring},0 14px 36px rgba(15,23,42,.18)`,
+    'border-radius:12px',
     'pointer-events:none',
     'box-sizing:border-box',
-    'transition:opacity .2s ease',
+    'transition:opacity .2s ease, transform .2s ease',
+    'animation:janhitHaloPulse 1.35s ease-in-out infinite',
   ].join(';');
 
   const labelElement = document.createElement('div');
@@ -1030,18 +1181,36 @@ function drawHighlight(element, label) {
     `left:${Math.max(8, rect.left)}px`,
     `top:${Math.max(8, rect.top - 36)}px`,
     'z-index:2147483647',
-    'max-width:min(360px,calc(100vw - 16px))',
-    'padding:7px 10px',
-    'border-radius:8px',
-    'background:#0f172a',
+    'max-width:min(280px,calc(100vw - 16px))',
+    'padding:6px 10px',
+    'border-radius:999px',
+    `background:${palette.label}`,
     'color:#ffffff',
-    'font:600 13px/1.3 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif',
-    'box-shadow:0 8px 24px rgba(15,23,42,.24)',
+    'font:700 12px/1.2 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif',
+    'letter-spacing:.01em',
+    'box-shadow:0 10px 28px rgba(15,23,42,.28)',
     'pointer-events:none',
   ].join(';');
 
   document.documentElement.append(overlay, labelElement);
   window.setTimeout(removeHighlight, 8000);
+}
+
+function classifyHighlightLabel(label) {
+  const normalized = typeof label === 'string' ? label.toLowerCase() : '';
+  if (normalized.includes('search')) return 'search';
+  if (normalized.includes('link')) return 'link';
+  if (normalized.includes('button') || normalized.includes('click')) return 'button';
+  if (normalized.includes('input') || normalized.includes('field') || normalized.includes('type') || normalized.includes('fill')) return 'input';
+  return 'default';
+}
+
+function getHighlightPalette(kind) {
+  if (kind === 'search') return { border: '#2563eb', ring: 'rgba(37,99,235,.18)', label: 'linear-gradient(135deg, rgba(37,99,235,.96), rgba(14,165,233,.95))' };
+  if (kind === 'link') return { border: '#7c3aed', ring: 'rgba(124,58,237,.18)', label: 'linear-gradient(135deg, rgba(109,40,217,.96), rgba(139,92,246,.95))' };
+  if (kind === 'button') return { border: '#ea580c', ring: 'rgba(234,88,12,.18)', label: 'linear-gradient(135deg, rgba(249,115,22,.96), rgba(234,88,12,.95))' };
+  if (kind === 'input') return { border: '#059669', ring: 'rgba(5,150,105,.18)', label: 'linear-gradient(135deg, rgba(16,185,129,.96), rgba(5,150,105,.95))' };
+  return { border: '#0ea5e9', ring: 'rgba(14,165,233,.18)', label: 'linear-gradient(135deg, rgba(15,23,42,.96), rgba(14,165,233,.95))' };
 }
 
 function removeHighlight() {
@@ -1385,4 +1554,5 @@ function delay(milliseconds) {
     window.setTimeout(resolve, milliseconds);
   });
 }
+
 

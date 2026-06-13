@@ -118,6 +118,9 @@ function normalizeProcessResult(payload, fallback, transcript, context) {
     user_profile: context.user_profile || {},
     viewport: context.viewport || null,
   });
+  const pageSummary = typeof pageContext.summary === 'string' && pageContext.summary.trim()
+    ? pageContext.summary.trim()
+    : buildGeneralResponse(transcript, null, context, nextQuestion);
 
   const responseText = getString(
     payloadSafe.responseText,
@@ -143,6 +146,7 @@ function normalizeProcessResult(payload, fallback, transcript, context) {
     nextQuestion,
     workflow,
     responseText: finalResponseText,
+    pageSummary,
     missingFields,
     browserAction,
     domAction,
@@ -183,9 +187,14 @@ function normalizeBrowserAction(rawAction) {
     return null;
   }
 
-  const candidate = /** @type {{ type?: unknown, targetId?: unknown, target_id?: unknown, targetSelector?: unknown, selector?: unknown, value?: unknown, label?: unknown }} */ (rawAction);
+  const candidate = /** @type {{ type?: unknown, targetId?: unknown, target_id?: unknown, targetSelector?: unknown, targetSelectorCandidates?: unknown, selector?: unknown, selectorCandidates?: unknown, value?: unknown, label?: unknown }} */ (rawAction);
   const type = typeof candidate.type === 'string' ? candidate.type.trim().toLowerCase() : 'none';
   const allowedTypes = ['none', 'highlight', 'scroll_to', 'focus', 'click', 'fill_field'];
+  const selectorCandidates = Array.isArray(candidate.targetSelectorCandidates)
+    ? candidate.targetSelectorCandidates.filter((value) => typeof value === 'string' && value.trim()).map((value) => value.trim()).slice(0, 8)
+    : Array.isArray(candidate.selectorCandidates)
+      ? candidate.selectorCandidates.filter((value) => typeof value === 'string' && value.trim()).map((value) => value.trim()).slice(0, 8)
+      : [];
 
   if (!allowedTypes.includes(type)) {
     return null;
@@ -214,6 +223,7 @@ function normalizeBrowserAction(rawAction) {
     type,
     targetId,
     targetSelector,
+    selectorCandidates,
     value,
     label,
   };
@@ -326,13 +336,14 @@ function inferBrowserAction(transcript, _intent, context) {
 
   const fieldTarget = findBestFieldElement(elements, normalized);
   if (fieldTarget && includesAny(normalized, ['fill', 'enter', 'type', 'set', 'update'])) {
-    return {
-      type: 'fill_field',
-      targetId: fieldTarget.id || null,
-      targetSelector: fieldTarget.selector || '',
-      value: detectFillValue(normalized) || '',
-      label: `Fill ${fieldTarget.label || fieldTarget.name || fieldTarget.text || 'field'}`,
-    };
+      return {
+        type: 'fill_field',
+        targetId: fieldTarget.id || null,
+        targetSelector: fieldTarget.selector || '',
+        selectorCandidates: Array.isArray(fieldTarget.selectorCandidates) ? fieldTarget.selectorCandidates : [],
+        value: detectFillValue(normalized) || '',
+        label: `Fill ${fieldTarget.label || fieldTarget.name || fieldTarget.text || 'field'}`,
+      };
   }
 
   if (includesAny(normalized, ['where is', 'show me', 'highlight', 'find the', 'locate the', 'point to'])) {
@@ -342,6 +353,7 @@ function inferBrowserAction(transcript, _intent, context) {
         type: 'highlight',
         targetId: target.id || null,
         targetSelector: target.selector || '',
+        selectorCandidates: Array.isArray(target.selectorCandidates) ? target.selectorCandidates : [],
         label: `Here is ${target.label || target.text || target.name || 'the element'}`,
       };
     }
@@ -354,6 +366,7 @@ function inferBrowserAction(transcript, _intent, context) {
         type: 'click',
         targetId: target.id || null,
         targetSelector: target.selector || '',
+        selectorCandidates: Array.isArray(target.selectorCandidates) ? target.selectorCandidates : [],
         label: `Click ${target.label || target.text || target.name || 'the item'}`,
       };
     }
@@ -366,6 +379,7 @@ function inferBrowserAction(transcript, _intent, context) {
         type: 'focus',
         targetId: target.id || null,
         targetSelector: target.selector || '',
+        selectorCandidates: Array.isArray(target.selectorCandidates) ? target.selectorCandidates : [],
         label: `Focus ${target.label || target.text || target.name || 'the element'}`,
       };
     }
@@ -382,9 +396,18 @@ function buildGeneralResponse(transcript, domAction, context, nextQuestion) {
   const page = context && typeof context === 'object' ? context.page || context : null;
   const pageTitle = page && typeof page.title === 'string' ? page.title.trim() : '';
   const pageText = page && typeof page.visibleText === 'string' ? page.visibleText : '';
+  const pageSummary = page && typeof page.summary === 'string' ? page.summary.trim() : '';
   const topElements = Array.isArray(page?.elements)
-    ? page.elements.slice(0, 5).map((element) => sanitizeValueText(element.label || element.name || element.placeholder || element.text || '')).filter(Boolean)
+    ? [...page.elements]
+        .sort((left, right) => (Number(right.importance) || 0) - (Number(left.importance) || 0))
+        .slice(0, 5)
+        .map((element) => sanitizeValueText(element.label || element.name || element.placeholder || element.text || ''))
+        .filter(Boolean)
     : [];
+
+  if (pageSummary) {
+    return pageSummary;
+  }
 
   if (pageTitle) {
     const summary = topElements.length > 0 ? `I see ${topElements.join(', ')}.` : '';
@@ -396,10 +419,10 @@ function buildGeneralResponse(transcript, domAction, context, nextQuestion) {
   }
 
   if (includesAny(transcript.toLowerCase(), ['where', 'search', 'url', 'link', 'button', 'field', 'input', 'highlight', 'click', 'fill'])) {
-    return 'Finding the best match on the page.';
+    return topElements.length > 0 ? `I found ${topElements[0]}.` : 'Finding the best match on the page.';
   }
 
-  return 'Finding the best match on the page.';
+  return topElements.length > 0 ? `I found ${topElements[0]}.` : 'Finding the best match on the page.';
 }
 
 function avoidEchoResponse(transcript, responseText, domAction, context, nextQuestion) {

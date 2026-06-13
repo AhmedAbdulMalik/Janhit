@@ -650,11 +650,11 @@ function sanitizeVoiceState(value) {
 }
 
 /**
- * @param {{ language?: unknown, intent?: unknown, workflow?: unknown, confidence?: unknown, responseText?: unknown, form?: unknown, browserAction?: unknown, domAction?: unknown, data?: { intent?: unknown, nextQuestion?: unknown, workflow?: unknown, confidence?: unknown, browserAction?: unknown, domAction?: unknown } | null }} response
+ * @param {{ language?: unknown, intent?: unknown, workflow?: unknown, confidence?: unknown, responseText?: unknown, pageSummary?: unknown, form?: unknown, browserAction?: unknown, domAction?: unknown, data?: { intent?: unknown, nextQuestion?: unknown, workflow?: unknown, confidence?: unknown, browserAction?: unknown, domAction?: unknown, pageSummary?: unknown } | null }} response
  * @returns {VoiceAssistantResult}
  */
 function buildAssistantResult(response) {
-  const data = /** @type {{ intent?: unknown, nextQuestion?: unknown, workflow?: unknown, confidence?: unknown, browserAction?: unknown, domAction?: unknown }} */ (response.data && typeof response.data === 'object' ? response.data : {});
+  const data = /** @type {{ intent?: unknown, nextQuestion?: unknown, workflow?: unknown, confidence?: unknown, browserAction?: unknown, domAction?: unknown, pageSummary?: unknown }} */ (response.data && typeof response.data === 'object' ? response.data : {});
   const intent = typeof response.intent === 'string'
     ? response.intent
     : typeof data.intent === 'string'
@@ -674,6 +674,11 @@ function buildAssistantResult(response) {
   const responseText = typeof response.responseText === 'string' && response.responseText.trim()
     ? response.responseText
     : nextQuestion || 'Please share one more detail so I can guide you correctly.';
+  const pageSummary = typeof response.pageSummary === 'string' && response.pageSummary.trim()
+    ? response.pageSummary.trim()
+    : typeof data.pageSummary === 'string' && data.pageSummary.trim()
+      ? data.pageSummary.trim()
+      : '';
 
   return {
     language: typeof response.language === 'string' && response.language.trim() ? response.language : 'hi-IN',
@@ -681,6 +686,7 @@ function buildAssistantResult(response) {
     workflow,
     confidence,
     responseText,
+    pageSummary,
     form: response.form,
     browserAction: response.browserAction || data.browserAction,
     domAction: response.domAction || data.domAction || null,

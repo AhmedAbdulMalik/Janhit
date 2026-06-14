@@ -7,3 +7,8 @@ build/
 .env
 .env.*
 !.env.example
+.github/ 
+.currorrules
+projectcontext.md
+buffer.txt
+context.md

@@ -1,13 +1,19 @@
 name = "janhit-worker"
 main = "src/worker/index.js"
 compatibility_date = "2024-12-02"
-account_id = "YOUR_ACCOUNT_ID_HERE"
+account_id = "YOUR_CLOUDFLARE_ACCOUNT_ID"
 workers_dev = true
+type = "javascript"
 
 [vars]
 GEMINI_MODEL = "gemini-2.5-flash"
 SARVAM_STT_MODEL = "saaras:v3"
+SARVAM_STT_MODE = "transcribe"
 SARVAM_STT_URL = "https://api.sarvam.ai/speech-to-text"
 SARVAM_TTS_URL = "https://api.sarvam.ai/text-to-speech"
 SARVAM_TTS_SPEAKER = "neha"
 SARVAM_TTS_MODEL = "bulbul:v3"
+
+[build]
+command = ""
+cwd = "./"

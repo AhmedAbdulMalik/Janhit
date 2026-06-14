@@ -10,8 +10,10 @@
 Janhit automatically identifies the correct procedure, asks for missing details, and autofills the appropriate forms directly in the browser.
 
 ---
-## Extension had Successfully Deployed to Monzilla Firefox 
+## Extension has been Successfully published on Monzilla Firefox as a Add-on (Extension)
 https://addons.mozilla.org/en-US/firefox/addon/janhit-ai-assistant/
+
+>The Extension is deployed on Cloudflare Workers (read below for local worker )
 
 ##  Core Features
 

@@ -62,7 +62,7 @@ let assistantProcessingPromise = null;
 /** @type {Promise<void> | null} */
 let offscreenCreatePromise = null;
 
-const api = new JanhitAPI('http://localhost:8787');
+const api = new JanhitAPI('https://janhit.abdulmalikandanas.workers.dev');
 
 chrome.runtime.onMessage.addListener(
   /**

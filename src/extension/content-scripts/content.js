@@ -32,9 +32,8 @@ const MAX_TEXT_LENGTH = 180;
 const HIGHLIGHT_ID = 'janhit-element-highlight';
 const HIGHLIGHT_LABEL_ID = 'janhit-element-highlight-label';
 const DRAFT_ID = 'janhit-generated-draft';
-const OVERLAY_ID = 'clicky-buddy-overlay';
-const CURSOR_ID = 'clicky-buddy-cursor';
-const BUBBLE_ID = 'clicky-buddy-bubble';
+const OVERLAY_ID = 'janhit-assistant-overlay';
+const BUBBLE_ID = 'janhit-assistant-bubble';
 
 if (!document.getElementById('janhit-halo-style')) {
   const style = document.createElement('style');
@@ -1254,21 +1253,6 @@ function ensureBuddyOverlay() {
     'z-index:2147483646',
   ].join(';');
 
-  const cursor = document.createElement('div');
-  cursor.id = CURSOR_ID;
-  cursor.style.cssText = [
-    'position:absolute',
-    'width:0',
-    'height:0',
-    'border-left:16px solid transparent',
-    'border-right:16px solid transparent',
-    'border-bottom:24px solid rgba(14,165,233,0.95)',
-    'filter:drop-shadow(0 10px 24px rgba(14,165,233,0.35))',
-    'transform:translate(-50%, -100%) scale(1)',
-    'transition:transform 220ms ease, left 220ms ease, top 220ms ease',
-    'pointer-events:none',
-  ].join(';');
-
   const bubble = document.createElement('div');
   bubble.id = BUBBLE_ID;
   bubble.style.cssText = [
@@ -1292,7 +1276,7 @@ function ensureBuddyOverlay() {
   ].join(';');
   bubble.textContent = '';
 
-  overlay.append(cursor, bubble);
+  
   document.body.appendChild(overlay);
 }
 
@@ -1304,10 +1288,9 @@ function ensureBuddyOverlay() {
 function setBuddyOverlay(text, state, targetRect) {
   ensureBuddyOverlay();
   const overlay = document.getElementById(OVERLAY_ID);
-  const cursor = document.getElementById(CURSOR_ID);
   const bubble = document.getElementById(BUBBLE_ID);
 
-  if (!overlay || !cursor || !bubble) {
+  if (!overlay || !bubble) {
     return;
   }
 
@@ -1336,10 +1319,10 @@ function setBuddyOverlay(text, state, targetRect) {
     }
   }
 
-  cursor.style.left = `${Math.min(Math.max(16, left), viewport.width - 16)}px`;
-  cursor.style.top = `${Math.min(Math.max(32, top), viewport.height - 32)}px`;
-  bubble.style.left = cursor.style.left;
-  bubble.style.top = `${Math.max(30, parseFloat(cursor.style.top) - 18)}px`;
+  const clampedLeft = `${Math.min(Math.max(16, left), viewport.width - 16)}px`;
+  const clampedTop = `${Math.max(30, Math.min(Math.max(32, top), viewport.height - 32) - 18)}px`;
+  bubble.style.left = clampedLeft;
+  bubble.style.top = clampedTop;
 
   if (buddyState.timeoutId) {
     window.clearTimeout(buddyState.timeoutId);
@@ -1363,7 +1346,7 @@ function getStateLabel(state) {
   if (state === 'thinking') return 'Thinkingâ€¦';
   if (state === 'speaking') return 'Speakingâ€¦';
   if (state === 'error') return 'Oops, something went wrong.';
-  return 'Clicky Buddy is ready.';
+  return 'Assistant is ready.';
 }
 
 function hideBuddyOverlay() {
@@ -1478,7 +1461,7 @@ function getVisiblePageText() {
  * @returns {boolean}
  */
 function isJanhitElement(element) {
-  return element.id === HIGHLIGHT_ID || element.id === HIGHLIGHT_LABEL_ID || element.id === DRAFT_ID || element.id === OVERLAY_ID || element.id === CURSOR_ID || element.id === BUBBLE_ID || Boolean(element.closest(`#${HIGHLIGHT_ID}, #${HIGHLIGHT_LABEL_ID}, #${DRAFT_ID}, #${OVERLAY_ID}`));
+  return element.id === HIGHLIGHT_ID || element.id === HIGHLIGHT_LABEL_ID || element.id === DRAFT_ID || element.id === OVERLAY_ID || element.id === BUBBLE_ID || Boolean(element.closest(`#${HIGHLIGHT_ID}, #${HIGHLIGHT_LABEL_ID}, #${DRAFT_ID}, #${OVERLAY_ID}`));
 }
 
 /**

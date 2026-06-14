@@ -1,5 +1,7 @@
 # 🇮🇳 Janhit - AI Civic Assistant
 
+##  BY Team YOKO
+
 > **Empowering Citizens Through AI**  
 > Make civic action as easy as having a conversation.
 
@@ -8,6 +10,8 @@
 Janhit automatically identifies the correct procedure, asks for missing details, and autofills the appropriate forms directly in the browser.
 
 ---
+## Extension had Successfully Deployed to Monzilla Firefox 
+https://addons.mozilla.org/en-US/firefox/addon/janhit-ai-assistant/
 
 ##  Core Features
 

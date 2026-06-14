@@ -266,7 +266,7 @@ async function processAssistantRequest(capture) {
       const activeTab = await getActiveHttpTab();
       const pageContext = activeTab ? await getPageContext(activeTab.id) : null;
 
-      const voiceAssistResponse = await api.voiceAssist(audioBlob, 'hi-IN', {
+      const voiceAssistResponse = await api.voiceAssist(audioBlob, 'auto', {
         currentUrl: activeTab?.url || 'unknown',
         currentTitle: activeTab?.title || '',
         page: pageContext,

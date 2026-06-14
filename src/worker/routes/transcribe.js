@@ -41,7 +41,7 @@ export async function transcribeFormData(formData, env) {
   }
 
   const audio = formData.get('audio');
-  const language = normalizeLanguage(getString(formData.get('language'), DEFAULT_LANGUAGE));
+  const requestedLanguage = normalizeLanguage(getString(formData.get('language'), DEFAULT_LANGUAGE));
 
   if (!(audio instanceof Blob)) {
     throw new Error('No audio provided');
@@ -59,7 +59,10 @@ export async function transcribeFormData(formData, env) {
   const upstreamFormData = new FormData();
   upstreamFormData.append('file', audio, fileName);
   upstreamFormData.append('model', getString(env.SARVAM_STT_MODEL, 'saaras:v3'));
-  upstreamFormData.append('language_code', language);
+
+  if (requestedLanguage) {
+    upstreamFormData.append('language_code', requestedLanguage);
+  }
 
   const mode = getString(formData.get('mode'), getString(env.SARVAM_STT_MODE, 'transcribe'));
   if (mode) {
@@ -86,17 +89,50 @@ export async function transcribeFormData(formData, env) {
     throw new Error('Sarvam response did not include transcript text');
   }
 
+  const detectedLanguage = extractLanguage(payload) || requestedLanguage || DEFAULT_LANGUAGE;
+
   return {
     transcript,
-    language,
+    language: detectedLanguage,
     confidence: extractConfidence(payload),
     raw: payload,
   };
 }
 
+function extractLanguage(payload) {
+  if (!payload || typeof payload !== 'object') {
+    return '';
+  }
+
+  const candidate = payload.data && typeof payload.data === 'object' ? payload.data : payload;
+  const values = [
+    candidate.language,
+    candidate.language_code,
+    candidate.detected_language,
+    candidate.detectedLanguage,
+    payload.language,
+    payload.language_code,
+    payload.detected_language,
+    payload.detectedLanguage,
+  ];
+
+  for (const value of values) {
+    const language = getString(value);
+    if (language && language.toLowerCase() !== 'auto') {
+      return normalizeLanguage(language);
+    }
+  }
+
+  return '';
+}
+
 function normalizeLanguage(language) {
-  const normalized = language.replace('_', '-');
-  return /^[a-z]{2,3}(-[A-Z]{2})?$/.test(normalized) ? normalized : DEFAULT_LANGUAGE;
+  const normalized = typeof language === 'string' ? language.replace('_', '-').trim() : '';
+  if (!normalized || normalized.toLowerCase() === 'auto') {
+    return '';
+  }
+
+  return /^[a-z]{2,3}(-[A-Z]{2})?$/.test(normalized) ? normalized : '';
 }
 
 function extractTranscript(payload) {

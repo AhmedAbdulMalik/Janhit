@@ -1,9 +1,8 @@
-name = "janhit-worker"
+name = "janhit"
 main = "src/worker/index.js"
 compatibility_date = "2024-12-02"
-account_id = "YOUR_CLOUDFLARE_ACCOUNT_ID"
+account_id = "53dde8187652869cfaf5179725d88522"
 workers_dev = true
-type = "javascript"
 
 [vars]
 GEMINI_MODEL = "gemini-2.5-flash"
